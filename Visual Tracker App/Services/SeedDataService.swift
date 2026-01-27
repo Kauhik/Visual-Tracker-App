@@ -1,63 +1,74 @@
-//
-//  SeedDataService.swift
-//  Visual Tracker App
-//
-//  Created by Kaushik Manian on 27/1/26.
-//
-
 import Foundation
 import SwiftData
 
 @MainActor
 class SeedDataService {
-    
+
     static func seedIfNeeded(modelContext: ModelContext) {
-        // Check if objectives already exist
         let objectiveDescriptor = FetchDescriptor<LearningObjective>()
         let existingObjectives = (try? modelContext.fetch(objectiveDescriptor)) ?? []
-        
+
+        let groupDescriptor = FetchDescriptor<CohortGroup>()
+        let existingGroups = (try? modelContext.fetch(groupDescriptor)) ?? []
+
+        if existingGroups.isEmpty {
+            seedSampleGroups(modelContext: modelContext)
+        }
+
         if existingObjectives.isEmpty {
             seedLearningObjectives(modelContext: modelContext)
             seedSampleStudent(modelContext: modelContext)
             try? modelContext.save()
         }
     }
-    
+
     private static func seedLearningObjectives(modelContext: ModelContext) {
         let objectives = createObjectiveHierarchy()
         for objective in objectives {
             modelContext.insert(objective)
         }
     }
-    
+
+    private static func seedSampleGroups(modelContext: ModelContext) {
+        let groups = [
+            CohortGroup(name: "Batch A", colorHex: "#3B82F6"),
+            CohortGroup(name: "iOS", colorHex: "#8B5CF6"),
+            CohortGroup(name: "Design", colorHex: "#F97316"),
+            CohortGroup(name: "Team 1", colorHex: "#10B981")
+        ]
+
+        for group in groups {
+            modelContext.insert(group)
+        }
+    }
+
     private static func seedSampleStudent(modelContext: ModelContext) {
-        let student = Student(name: "Kaushik Manian")
+        let groupDescriptor = FetchDescriptor<CohortGroup>()
+        let groups = (try? modelContext.fetch(groupDescriptor)) ?? []
+        let defaultGroup = groups.first(where: { $0.name == "iOS" })
+
+        let student = Student(name: "Kaushik Manian", group: defaultGroup)
         modelContext.insert(student)
-        
-        // Create progress records with sample data
-        // A.1 = 100% (complete)
+
         let progressA1 = ObjectiveProgress(objectiveCode: "A.1", completionPercentage: 100)
         progressA1.student = student
         modelContext.insert(progressA1)
-        
-        // A.2 = 0% (not started)
+
         let progressA2 = ObjectiveProgress(objectiveCode: "A.2", completionPercentage: 0)
         progressA2.student = student
         modelContext.insert(progressA2)
-        
-        // A.3 = 100% (complete)
+
         let progressA3 = ObjectiveProgress(objectiveCode: "A.3", completionPercentage: 100)
         progressA3.student = student
         modelContext.insert(progressA3)
-        
+
         student.progressRecords = [progressA1, progressA2, progressA3]
     }
-    
+
     private static func createObjectiveHierarchy() -> [LearningObjective] {
         var objectives: [LearningObjective] = []
         var sortOrder = 0
-        
-        // Category A - Quantitative
+
         objectives.append(LearningObjective(
             code: "A",
             title: "Able to apply 100% of core LOs for chosen path",
@@ -67,7 +78,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "A.1",
             title: "Expose core LOs for all",
@@ -77,7 +88,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "A.2",
             title: "Understand core LOs for all",
@@ -87,7 +98,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "A.3",
             title: "Apply domain core LOs for their chosen path",
@@ -97,8 +108,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // Category B - Qualitative
+
         objectives.append(LearningObjective(
             code: "B",
             title: "Able to LUR - Learn Unlearn Relearn",
@@ -108,7 +118,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "B.L",
             title: "Have a positive attitude for learning",
@@ -118,7 +128,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "B.U",
             title: "Be okay/comfortable to have existing knowledge challenged",
@@ -128,7 +138,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "B.R",
             title: "Adapt to newly acquired knowledge",
@@ -138,8 +148,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // Category C - Nested hierarchy
+
         objectives.append(LearningObjective(
             code: "C",
             title: "Able to analyze and create solutions based on data",
@@ -149,8 +158,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // C.1 Data Gathering & Understanding
+
         objectives.append(LearningObjective(
             code: "C.1",
             title: "Data Gathering & Understanding",
@@ -160,7 +168,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.1.1",
             title: "Understand the importance of data",
@@ -170,7 +178,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.1.2",
             title: "Understand how to gather & understand data",
@@ -180,7 +188,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.1.3",
             title: "Apply gathering & understanding of data",
@@ -190,8 +198,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // C.2 Data Synthesis & Analysis
+
         objectives.append(LearningObjective(
             code: "C.2",
             title: "Data Synthesis & Analysis",
@@ -201,7 +208,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.2.1",
             title: "Exposure to synthesize & analyze data",
@@ -211,7 +218,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.2.2",
             title: "Understand how to synthesize & analyze data",
@@ -221,7 +228,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.2.3",
             title: "Apply synthesis & analysis of data",
@@ -231,8 +238,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // C.3 Data-Driven Decision Making
+
         objectives.append(LearningObjective(
             code: "C.3",
             title: "Data-Driven Decision Making",
@@ -242,7 +248,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.3.1",
             title: "Understand how to make data-driven decisions",
@@ -252,7 +258,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.3.2",
             title: "Apply making data-driven decisions",
@@ -262,8 +268,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // C.4 Data-Based Argumentation
+
         objectives.append(LearningObjective(
             code: "C.4",
             title: "Data-Based Argumentation",
@@ -273,7 +278,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.4.1",
             title: "Understand how to argue/defend/enrich decisions based on data",
@@ -283,7 +288,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "C.4.2",
             title: "Apply argumentation/defense/enrichment based on data",
@@ -293,8 +298,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // Category D - Qualitative
+
         objectives.append(LearningObjective(
             code: "D",
             title: "Able to create positive influence and empower each other",
@@ -304,7 +308,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "D.1",
             title: "Self-Leadership",
@@ -314,7 +318,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "D.2",
             title: "Share Responsibility",
@@ -324,7 +328,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "D.3",
             title: "Inspire Others",
@@ -334,8 +338,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
-        // Category E - Qualitative
+
         objectives.append(LearningObjective(
             code: "E",
             title: "Able to identify pathways & requirements toward career aspiration",
@@ -345,7 +348,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "E.1",
             title: "Self-Discovery",
@@ -355,7 +358,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "E.2",
             title: "Knowing Your Options",
@@ -365,7 +368,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "E.3",
             title: "Decide the Area of Exploration",
@@ -375,7 +378,7 @@ class SeedDataService {
             sortOrder: sortOrder
         ))
         sortOrder += 1
-        
+
         objectives.append(LearningObjective(
             code: "E.4",
             title: "Planning Actions in Decided Path",
@@ -384,7 +387,7 @@ class SeedDataService {
             parentCode: "E",
             sortOrder: sortOrder
         ))
-        
+
         return objectives
     }
 }

@@ -10,7 +10,16 @@ struct StudentOverviewBoard: View {
     @Binding var selectedStudent: Student?
 
     @State private var showingAddSheet: Bool = false
+    @State private var showingManageGroups: Bool = false
     @State private var studentPendingDelete: Student?
+
+    @State private var editingStudentId: UUID?
+    @State private var editingStudentName: String = ""
+
+    @FocusState private var renameFocusedStudentId: UUID?
+
+    @State private var showingRenameError: Bool = false
+    @State private var renameErrorMessage: String = ""
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -31,10 +40,46 @@ struct StudentOverviewBoard: View {
 
             List(selection: $selectedStudent) {
                 Section {
+                    cohortOverviewRow
+                        .selectionDisabled(true)
+
+                    ForEach(rootCategories) { category in
+                        cohortCategoryRow(category)
+                            .selectionDisabled(true)
+                    }
+
+                    Button {
+                        showingManageGroups = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "folder.badge.gearshape")
+                            Text("Manage Groups")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                } header: {
+                    Text("Cohort Overview")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section {
                     ForEach(students) { student in
                         studentRow(student)
                             .tag(student as Student?)
                             .contextMenu {
+                                Button("Rename") {
+                                    beginRename(student)
+                                }
+
+                                Divider()
+
                                 Button("Delete Student", role: .destructive) {
                                     studentPendingDelete = student
                                 }
@@ -45,27 +90,16 @@ struct StudentOverviewBoard: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-
-                Section {
-                    cohortOverviewRow
-                        .selectionDisabled(true)
-
-                    ForEach(rootCategories) { category in
-                        cohortCategoryRow(category)
-                            .selectionDisabled(true)
-                    }
-                } header: {
-                    Text("Cohort Overview")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
             }
             .listStyle(.sidebar)
         }
         .sheet(isPresented: $showingAddSheet) {
-            AddStudentSheet { name in
-                addStudent(named: name)
+            AddStudentSheet { name, group in
+                addStudent(named: name, group: group)
             }
+        }
+        .sheet(isPresented: $showingManageGroups) {
+            ManageGroupsSheet()
         }
         .confirmationDialog(
             "Delete Student",
@@ -88,6 +122,11 @@ struct StudentOverviewBoard: View {
             if let student = studentPendingDelete {
                 Text("Delete \(student.name)? This action cannot be undone.")
             }
+        }
+        .alert("Rename Failed", isPresented: $showingRenameError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(renameErrorMessage)
         }
         .onAppear {
             if selectedStudent == nil {
@@ -121,6 +160,7 @@ struct StudentOverviewBoard: View {
 
     private func studentRow(_ student: Student) -> some View {
         let overall = ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
+        let isEditing = editingStudentId == student.id
 
         return HStack(spacing: 10) {
             ZStack {
@@ -139,10 +179,36 @@ struct StudentOverviewBoard: View {
                     .foregroundColor(.white)
             }
 
-            Text(student.name)
-                .font(.body)
-                .foregroundColor(.primary)
-                .lineLimit(1)
+            if isEditing {
+                TextField("", text: $editingStudentName)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .focused($renameFocusedStudentId, equals: student.id)
+                    .onSubmit {
+                        commitRename(for: student)
+                    }
+                    .onChange(of: renameFocusedStudentId) { _, newValue in
+                        if editingStudentId == student.id, newValue != student.id {
+                            commitRename(for: student)
+                        }
+                    }
+                    .onExitCommand {
+                        cancelRename()
+                    }
+                    .onAppear {
+                        if editingStudentName.isEmpty {
+                            editingStudentName = student.name
+                        }
+                        DispatchQueue.main.async {
+                            renameFocusedStudentId = student.id
+                        }
+                    }
+            } else {
+                Text(student.name)
+                    .font(.body)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+            }
 
             Spacer()
 
@@ -228,11 +294,11 @@ struct StudentOverviewBoard: View {
         .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
     }
 
-    private func addStudent(named name: String) {
+    private func addStudent(named name: String, group: CohortGroup?) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 
-        let newStudent = Student(name: trimmed)
+        let newStudent = Student(name: trimmed, group: group)
         modelContext.insert(newStudent)
 
         do {
@@ -257,6 +323,51 @@ struct StudentOverviewBoard: View {
             }
         } catch {
             print("Failed to delete student: \(error)")
+        }
+    }
+
+    private func beginRename(_ student: Student) {
+        editingStudentId = student.id
+        editingStudentName = student.name
+        renameFocusedStudentId = student.id
+    }
+
+    private func cancelRename() {
+        editingStudentId = nil
+        editingStudentName = ""
+        renameFocusedStudentId = nil
+    }
+
+    private func commitRename(for student: Student) {
+        guard editingStudentId == student.id else { return }
+
+        let trimmed = editingStudentName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmed.isEmpty == false else {
+            renameErrorMessage = "Name cannot be empty."
+            showingRenameError = true
+            DispatchQueue.main.async {
+                renameFocusedStudentId = student.id
+            }
+            return
+        }
+
+        if trimmed == student.name {
+            cancelRename()
+            return
+        }
+
+        student.name = trimmed
+
+        do {
+            try modelContext.save()
+            cancelRename()
+        } catch {
+            renameErrorMessage = "Failed to rename student: \(error)"
+            showingRenameError = true
+            DispatchQueue.main.async {
+                renameFocusedStudentId = student.id
+            }
         }
     }
 

@@ -47,4 +47,15 @@ enum ProgressCalculator {
         }
         return total / students.count
     }
+
+    static func groupOverall(group: CohortGroup, students: [Student], allObjectives: [LearningObjective]) -> Int {
+        let groupStudents = students.filter { $0.group?.id == group.id }
+        guard groupStudents.isEmpty == false else { return 0 }
+
+        var total = 0
+        for student in groupStudents {
+            total += studentOverall(student: student, allObjectives: allObjectives)
+        }
+        return total / groupStudents.count
+    }
 }

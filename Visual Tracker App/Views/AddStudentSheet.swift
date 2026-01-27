@@ -1,11 +1,15 @@
 import SwiftUI
+import SwiftData
 
 struct AddStudentSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name: String = ""
+    @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
 
-    let onAdd: (String) -> Void
+    @State private var name: String = ""
+    @State private var selectedGroup: CohortGroup? = nil
+
+    let onAdd: (String, CohortGroup?) -> Void
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -19,6 +23,16 @@ struct AddStudentSheet: View {
 
             Form {
                 TextField("Student Name", text: $name)
+
+                Picker("Group", selection: $selectedGroup) {
+                    Text("Ungrouped").tag(nil as CohortGroup?)
+                    if groups.isEmpty == false {
+                        Divider()
+                        ForEach(groups) { group in
+                            Text(group.name).tag(group as CohortGroup?)
+                        }
+                    }
+                }
             }
             .formStyle(.grouped)
 
@@ -30,7 +44,7 @@ struct AddStudentSheet: View {
                 }
 
                 Button("Add") {
-                    onAdd(trimmedName)
+                    onAdd(trimmedName, selectedGroup)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)

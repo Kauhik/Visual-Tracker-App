@@ -1,39 +1,37 @@
-//
-//  Visual_Tracker_AppApp.swift
-//  Visual Tracker App
-//
-//  Created by Kaushik Manian on 27/1/26.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
 struct Visual_Tracker_AppApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Student.self,
-            LearningObjective.self,
-            ObjectiveProgress.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    private let container: ModelContainer
 
+    init() {
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let schema = Schema([
+                Student.self,
+                LearningObjective.self,
+                ObjectiveProgress.self,
+                CohortGroup.self
+            ])
+
+            let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            let builtContainer = try ModelContainer(for: schema, configurations: [configuration])
+
+            self.container = builtContainer
+            let mainContext = builtContainer.mainContext
+
+            Task { @MainActor in
+                SeedDataService.seedIfNeeded(modelContext: mainContext)
+            }
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            fatalError("Failed to create ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .onAppear {
-                    SeedDataService.seedIfNeeded(modelContext: sharedModelContainer.mainContext)
-                }
+                .modelContainer(container)
         }
-        .modelContainer(sharedModelContainer)
-        .windowStyle(.automatic)
-        .defaultSize(width: 1200, height: 800)
     }
 }

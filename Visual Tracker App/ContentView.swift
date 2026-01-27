@@ -12,21 +12,15 @@ struct ContentView: View {
             StudentOverviewBoard(selectedStudent: $selectedStudent)
                 .navigationTitle("Students")
         } detail: {
-            Group {
-                if let student = selectedStudent {
-                    StudentDetailView(student: student, selectedStudent: $selectedStudent)
-                } else if students.isEmpty {
+            SwiftUI.Group {
+                if students.isEmpty {
                     ContentUnavailableView(
                         "No Students",
                         systemImage: "person.3",
                         description: Text("Add a student to start tracking progress.")
                     )
                 } else {
-                    ContentUnavailableView(
-                        "Select a Student",
-                        systemImage: "person.crop.circle",
-                        description: Text("Choose a student from the sidebar to view and edit progress.")
-                    )
+                    StudentDetailView(selectedStudent: $selectedStudent)
                 }
             }
             .navigationTitle("Visual Tracker")
@@ -61,6 +55,7 @@ struct ContentView: View {
             try modelContext.delete(model: ObjectiveProgress.self)
             try modelContext.delete(model: Student.self)
             try modelContext.delete(model: LearningObjective.self)
+            try modelContext.delete(model: CohortGroup.self)
             try modelContext.save()
 
             selectedStudent = nil
@@ -78,5 +73,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self], inMemory: true)
+        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self, CohortGroup.self], inMemory: true)
 }

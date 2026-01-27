@@ -4,8 +4,10 @@ struct StudentCardView: View {
     let student: Student
     let overallProgress: Int
     let isSelected: Bool
+    let groups: [CohortGroup]
     let onSelect: () -> Void
     let onRequestDelete: () -> Void
+    let onMoveToGroup: (CohortGroup?) -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -13,15 +15,13 @@ struct StudentCardView: View {
                 HStack(spacing: 12) {
                     avatar
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(student.name)
                             .font(.headline)
                             .foregroundColor(.primary)
                             .lineLimit(1)
 
-                        Text("Overall")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        groupBadge
                     }
 
                     Spacer()
@@ -49,6 +49,18 @@ struct StudentCardView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Menu("Move to Group") {
+                Button("Ungrouped") { onMoveToGroup(nil) }
+                if groups.isEmpty == false {
+                    Divider()
+                    ForEach(groups) { group in
+                        Button(group.name) { onMoveToGroup(group) }
+                    }
+                }
+            }
+
+            Divider()
+
             Button("Delete Student", role: .destructive) {
                 onRequestDelete()
             }
@@ -73,5 +85,30 @@ struct StudentCardView: View {
                 .font(.system(size: 18, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
         }
+    }
+
+    private var groupBadge: some View {
+        let name = student.group?.name ?? "Ungrouped"
+        let color = Color(hex: student.group?.colorHex) ?? Color.secondary.opacity(0.25)
+
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+
+            Text(name)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
