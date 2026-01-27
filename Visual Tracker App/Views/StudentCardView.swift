@@ -11,8 +11,8 @@ struct StudentCardView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
                     avatar
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -28,7 +28,7 @@ struct StudentCardView: View {
 
                     ZStack {
                         CircularProgressView(progress: Double(overallProgress) / 100.0)
-                            .frame(width: 38, height: 38)
+                            .frame(width: 30, height: 30)
 
                         Text("\(overallProgress)%")
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -36,7 +36,7 @@ struct StudentCardView: View {
                     }
                 }
             }
-            .padding(14)
+            .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -79,7 +79,7 @@ struct StudentCardView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 42, height: 42)
+                .frame(width: 36, height: 36)
 
             Text(student.name.prefix(1).uppercased())
                 .font(.system(size: 18, weight: .bold, design: .rounded))

@@ -234,6 +234,8 @@ struct StudentDetailView: View {
                 Text(scopeSubtitle)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                overviewFilterMenu
             }
 
             Spacer()
@@ -402,7 +404,7 @@ struct StudentDetailView: View {
 
                 Spacer()
 
-                filterMenu
+                studentBoardFilterMenu
                     .buttonStyle(.bordered)
             }
 
@@ -437,7 +439,7 @@ struct StudentDetailView: View {
                                     move(student: boardStudent, to: group)
                                 }
                             )
-                            .frame(width: 300)
+                            .frame(width: 210)
                         }
 
                         addStudentCard
@@ -458,7 +460,17 @@ struct StudentDetailView: View {
         )
     }
 
-    private var filterMenu: some View {
+    private var studentBoardFilterMenu: some View {
+        filterMenuView(style: .standard)
+            .help("Filter student cards by group (also sets the scope shown in header and A–E breakdown)")
+    }
+
+    private var overviewFilterMenu: some View {
+        filterMenuView(style: .compact)
+            .help("Change the scope shown in the overview container")
+    }
+
+    private func filterMenuView(style: FilterMenuStyle) -> some View {
         Menu {
             Button("Overall") {
                 beginScopeSwitch(to: .all, group: nil)
@@ -479,35 +491,34 @@ struct StudentDetailView: View {
                 beginScopeSwitch(to: .ungrouped, group: nil)
             }
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: style == .compact ? 6 : 8) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .foregroundColor(.secondary)
 
-                Text("Filter:")
-                    .font(.caption)
+                Text(style == .compact ? "Scope:" : "Filter:")
+                    .font(style == .compact ? .caption2 : .caption)
                     .foregroundColor(.secondary)
 
                 Text(selectedGroupFilter.title(groups: groups))
-                    .font(.caption)
+                    .font(style == .compact ? .caption2 : .caption)
                     .fontWeight(.semibold)
 
                 Image(systemName: "chevron.down")
-                    .font(.caption2)
+                    .font(style == .compact ? .caption2 : .caption2)
                     .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, style == .compact ? 8 : 10)
+            .padding(.vertical, style == .compact ? 4 : 6)
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: style == .compact ? 8 : 10)
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: style == .compact ? 8 : 10)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }
         .menuStyle(.borderlessButton)
-        .help("Filter student cards by group (also sets the scope shown in header and A–E breakdown)")
     }
 
     private var addStudentCard: some View {
@@ -648,5 +659,10 @@ struct StudentDetailView: View {
                 return groups.first(where: { $0.id == id })?.name ?? "Group"
             }
         }
+    }
+
+    private enum FilterMenuStyle {
+        case standard
+        case compact
     }
 }

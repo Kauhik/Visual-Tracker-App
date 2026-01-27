@@ -12,6 +12,7 @@ struct StudentOverviewBoard: View {
     @State private var showingAddSheet: Bool = false
     @State private var showingManageGroups: Bool = false
     @State private var studentPendingDelete: Student?
+    @State private var searchText: String = ""
 
     @State private var editingStudentId: UUID?
     @State private var editingStudentName: String = ""
@@ -31,12 +32,42 @@ struct StudentOverviewBoard: View {
         ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
     }
 
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var filteredStudents: [Student] {
+        let query = trimmedSearchText.lowercased()
+        guard query.isEmpty == false else { return students }
+
+        return students.filter { student in
+            let nameMatches = student.name.lowercased().contains(query)
+            let groupName = student.group?.name.lowercased() ?? ""
+            let groupMatches = groupName.contains(query)
+            let ungroupedMatches = query.contains("ungrouped") && student.group == nil
+
+            return nameMatches || groupMatches || ungroupedMatches
+        }
+    }
+
+    private var studentsHeaderText: String {
+        if trimmedSearchText.isEmpty {
+            return "Students"
+        }
+
+        return "Students (\(filteredStudents.count))"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, 12)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
+
+            sidebarSearchBar
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
 
             List(selection: $selectedStudent) {
                 Section {
@@ -70,7 +101,7 @@ struct StudentOverviewBoard: View {
                 }
 
                 Section {
-                    ForEach(students) { student in
+                    ForEach(filteredStudents) { student in
                         studentRow(student)
                             .tag(student as Student?)
                             .contextMenu {
@@ -86,7 +117,7 @@ struct StudentOverviewBoard: View {
                             }
                     }
                 } header: {
-                    Text("Students")
+                    Text(studentsHeaderText)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -156,6 +187,27 @@ struct StudentOverviewBoard: View {
             }
             .buttonStyle(.borderedProminent)
         }
+    }
+
+    private var sidebarSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+
+            TextField("Search students or groups", text: $searchText)
+                .textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .controlSize(.small)
     }
 
     private func studentRow(_ student: Student) -> some View {
