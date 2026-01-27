@@ -14,7 +14,7 @@ struct ContentView: View {
         } detail: {
             Group {
                 if let student = selectedStudent {
-                    StudentDetailView(student: student)
+                    StudentDetailView(student: student, selectedStudent: $selectedStudent)
                 } else if students.isEmpty {
                     ContentUnavailableView(
                         "No Students",

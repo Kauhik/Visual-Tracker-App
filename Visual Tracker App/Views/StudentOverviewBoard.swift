@@ -23,18 +23,44 @@ struct StudentOverviewBoard: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
 
-                if students.isEmpty {
-                    emptyState
-                } else {
-                    cohortOverviewSection
-                    studentsGrid
+            List(selection: $selectedStudent) {
+                Section {
+                    ForEach(students) { student in
+                        studentRow(student)
+                            .tag(student as Student?)
+                            .contextMenu {
+                                Button("Delete Student", role: .destructive) {
+                                    studentPendingDelete = student
+                                }
+                            }
+                    }
+                } header: {
+                    Text("Students")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Section {
+                    cohortOverviewRow
+                        .selectionDisabled(true)
+
+                    ForEach(rootCategories) { category in
+                        cohortCategoryRow(category)
+                            .selectionDisabled(true)
+                    }
+                } header: {
+                    Text("Cohort Overview")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(16)
+            .listStyle(.sidebar)
         }
         .sheet(isPresented: $showingAddSheet) {
             AddStudentSheet { name in
@@ -93,124 +119,113 @@ struct StudentOverviewBoard: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ContentUnavailableView(
-                "No Students",
-                systemImage: "person.3",
-                description: Text("Add a student to start tracking progress across the fixed learning objectives.")
-            )
+    private func studentRow(_ student: Student) -> some View {
+        let overall = ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
 
-            Button {
-                showingAddSheet = true
-            } label: {
-                Label("Add Student", systemImage: "plus")
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 28, height: 28)
+
+                Text(student.name.prefix(1).uppercased())
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(student.name)
+                .font(.body)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                CircularProgressView(progress: Double(overall) / 100.0)
+                    .frame(width: 18, height: 18)
+
+                Text("\(overall)%")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
         }
-        .padding(.top, 6)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
-    private var cohortOverviewSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Cohort Overview")
-                .font(.headline)
+    private var cohortOverviewRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Overall")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Overall")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    HStack(spacing: 10) {
-                        Text("\(cohortOverall)%")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundColor(.accentColor)
-
-                        CircularProgressView(progress: Double(cohortOverall) / 100.0)
-                            .frame(width: 44, height: 44)
-                    }
-                }
-
-                Spacer()
+                Text("\(cohortOverall)%")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.accentColor)
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
 
-            VStack(spacing: 8) {
-                ForEach(rootCategories) { category in
-                    let value = ProgressCalculator.cohortObjectiveAverage(
-                        objectiveCode: category.code,
-                        students: students,
-                        allObjectives: allObjectives
-                    )
+            Spacer()
 
-                    HStack(spacing: 10) {
-                        Text(category.code)
-                            .font(.system(.subheadline, design: .rounded))
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(categoryColor(for: category.code))
-                            )
-
-                        Text(category.title)
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-
-                        Spacer()
-
-                        Text("\(value)%")
-                            .font(.system(.subheadline, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(categoryColor(for: category.code).opacity(0.10))
-                    )
-                }
-            }
+            CircularProgressView(progress: Double(cohortOverall) / 100.0)
+                .frame(width: 34, height: 34)
         }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+        .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 6, trailing: 10))
     }
 
-    private var studentsGrid: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Student Board")
-                .font(.headline)
+    private func cohortCategoryRow(_ category: LearningObjective) -> some View {
+        let value = ProgressCalculator.cohortObjectiveAverage(
+            objectiveCode: category.code,
+            students: students,
+            allObjectives: allObjectives
+        )
 
-            let columns = [
-                GridItem(.adaptive(minimum: 260), spacing: 12, alignment: .top)
-            ]
+        return HStack(spacing: 10) {
+            Text(category.code)
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(categoryColor(for: category.code))
+                )
 
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(students) { student in
-                    let overall = ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
+            Text(category.title)
+                .font(.caption)
+                .foregroundColor(.primary)
+                .lineLimit(1)
 
-                    StudentCardView(
-                        student: student,
-                        overallProgress: overall,
-                        isSelected: selectedStudent?.id == student.id,
-                        onSelect: {
-                            selectedStudent = student
-                        },
-                        onRequestDelete: {
-                            studentPendingDelete = student
-                        }
-                    )
-                }
-            }
+            Spacer()
+
+            Text("\(value)%")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.secondary)
         }
-        .padding(.top, 6)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(categoryColor(for: category.code).opacity(0.10))
+        )
+        .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
     }
 
     private func addStudent(named name: String) {
