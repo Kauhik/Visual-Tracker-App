@@ -3,6 +3,7 @@ import SwiftData
 
 struct StudentDetailView: View {
     @Binding var selectedStudent: Student?
+    @Binding var selectedGroup: CohortGroup?
 
     @Environment(\.modelContext) private var modelContext
 
@@ -14,6 +15,7 @@ struct StudentDetailView: View {
     @State private var studentPendingDelete: Student?
 
     @State private var selectedGroupFilter: GroupFilter = .all
+    @State private var isSwitchingScope: Bool = false
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -21,69 +23,8 @@ struct StudentDetailView: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
-    private enum HeaderMode {
-        case cohort
-        case group(CohortGroup?)
-        case student(Student)
-    }
-
-    private var headerMode: HeaderMode {
-        if let student = selectedStudent {
-            return .student(student)
-        }
-
-        switch selectedGroupFilter {
-        case .all:
-            return .cohort
-        case .ungrouped:
-            return .group(nil)
-        case .group(let id):
-            if let group = groups.first(where: { $0.id == id }) {
-                return .group(group)
-            }
-            return .cohort
-        }
-    }
-
-    private var cohortOverall: Int {
-        ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
-    }
-
-    private var groupStudents: [Student] {
-        switch headerMode {
-        case .group(let group):
-            if let group {
-                return students.filter { $0.group?.id == group.id }
-            } else {
-                return students.filter { $0.group == nil }
-            }
-        default:
-            return []
-        }
-    }
-
-    private var groupOverall: Int {
-        switch headerMode {
-        case .group(let group):
-            if let group {
-                return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
-            } else {
-                return ungroupedOverall
-            }
-        default:
-            return 0
-        }
-    }
-
-    private var ungroupedOverall: Int {
-        let ungrouped = students.filter { $0.group == nil }
-        guard ungrouped.isEmpty == false else { return 0 }
-
-        var total = 0
-        for s in ungrouped {
-            total += ProgressCalculator.studentOverall(student: s, allObjectives: allObjectives)
-        }
-        return total / ungrouped.count
+    private var ungroupedStudents: [Student] {
+        students.filter { $0.group == nil }
     }
 
     private var filteredStudents: [Student] {
@@ -91,20 +32,79 @@ struct StudentDetailView: View {
         case .all:
             return students
         case .ungrouped:
-            return students.filter { $0.group == nil }
+            return ungroupedStudents
         case .group(let id):
             return students.filter { $0.group?.id == id }
+        }
+    }
+
+    private var breakdownStudents: [Student] {
+        filteredStudents
+    }
+
+    private var eligibleStudentCount: Int {
+        breakdownStudents.count
+    }
+
+    private var scopeTitle: String {
+        switch selectedGroupFilter {
+        case .all:
+            return "Overall"
+        case .ungrouped:
+            return "Ungrouped"
+        case .group(let id):
+            return groups.first(where: { $0.id == id })?.name ?? (selectedGroup?.name ?? "Group")
+        }
+    }
+
+    private var scopeSubtitle: String {
+        let count = eligibleStudentCount
+        switch selectedGroupFilter {
+        case .all:
+            return "\(count) student\(count == 1 ? "" : "s")"
+        case .ungrouped:
+            return "\(count) student\(count == 1 ? "" : "s")"
+        case .group:
+            return "\(count) student\(count == 1 ? "" : "s")"
+        }
+    }
+
+    private var scopeIconSystemName: String {
+        switch selectedGroupFilter {
+        case .all:
+            return "chart.bar.fill"
+        case .ungrouped:
+            return "tray.fill"
+        case .group:
+            return "folder.fill"
+        }
+    }
+
+    private var scopeOverallProgress: Int {
+        switch selectedGroupFilter {
+        case .all:
+            return ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
+        case .ungrouped:
+            return ProgressCalculator.cohortOverall(students: ungroupedStudents, allObjectives: allObjectives)
+        case .group(let id):
+            if let group = groups.first(where: { $0.id == id }) {
+                return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
+            }
+            if let group = selectedGroup {
+                return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
+            }
+            return 0
         }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                headerCard
+                unifiedOverviewContainer
 
                 studentBoardSection
 
-                if let student = selectedStudent {
+                if let student = selectedStudent, eligibleStudentCount > 0 {
                     legendView
                         .padding(.top, 2)
 
@@ -122,13 +122,23 @@ struct StudentDetailView: View {
                     Divider()
                         .opacity(0.25)
 
-                    ContentUnavailableView(
-                        "No Student Selected",
-                        systemImage: "person.crop.circle.badge.questionmark",
-                        description: Text("Select a student from the board, or use the filter to view cohort or group progress.")
-                    )
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    if eligibleStudentCount == 0 {
+                        ContentUnavailableView(
+                            "No Students in Scope",
+                            systemImage: "person.3",
+                            description: Text(emptyScopeDescription)
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    } else {
+                        ContentUnavailableView(
+                            "No Student Selected",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("Select a student from the board to view progress details.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
                 }
             }
             .padding(20)
@@ -148,36 +158,42 @@ struct StudentDetailView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                if let student = studentPendingDelete {
-                    deleteStudent(student)
+                if let studentPendingDelete {
+                    deleteStudent(studentPendingDelete)
                 }
                 studentPendingDelete = nil
             }
+
             Button("Cancel", role: .cancel) {
                 studentPendingDelete = nil
             }
         } message: {
-            if let student = studentPendingDelete {
-                Text("Delete \(student.name)? This action cannot be undone.")
+            if let studentPendingDelete {
+                Text("Delete \(studentPendingDelete.name)? This action cannot be undone.")
             }
-        }
-        .onAppear {
-            syncFilterToSelectedStudentIfNeeded()
-        }
-        .onChange(of: selectedStudent?.id) { _, _ in
-            syncFilterToSelectedStudentIfNeeded()
         }
     }
 
-    private var headerCard: some View {
-        SwiftUI.Group {
-            switch headerMode {
-            case .cohort:
-                cohortModeHeader
-            case .group(let group):
-                groupModeHeader(group: group)
-            case .student(let student):
-                studentModeHeader(student: student)
+    private var unifiedOverviewContainer: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            overviewHeaderRow
+
+            if eligibleStudentCount == 0 {
+                Divider()
+                    .opacity(0.22)
+
+                ContentUnavailableView(
+                    emptyScopeTitle,
+                    systemImage: "person.3",
+                    description: Text(emptyScopeDescription)
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            } else {
+                Divider()
+                    .opacity(0.22)
+
+                overviewBreakdownSection
             }
         }
         .padding(20)
@@ -192,58 +208,8 @@ struct StudentDetailView: View {
         )
     }
 
-    private var cohortModeHeader: some View {
+    private var overviewHeaderRow: some View {
         HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue.opacity(0.20), .purple.opacity(0.20)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 64, height: 64)
-
-                Image(systemName: "person.3.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundColor(.accentColor)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Cohort Overview")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                Text("All students")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("Overall Progress")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 8) {
-                    Text("\(cohortOverall)%")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.accentColor)
-
-                    CircularProgressView(progress: Double(cohortOverall) / 100.0)
-                        .frame(width: 50, height: 50)
-                }
-            }
-        }
-    }
-
-    private func groupModeHeader(group: CohortGroup?) -> some View {
-        let title = group?.name ?? "Ungrouped"
-        let count = groupStudents.count
-
-        return HStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(
@@ -255,92 +221,19 @@ struct StudentDetailView: View {
                     )
                     .frame(width: 64, height: 64)
 
-                Image(systemName: "folder.fill")
+                Image(systemName: scopeIconSystemName)
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundColor(.accentColor)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Group: \(title)")
+                Text(scopeTitle)
                     .font(.largeTitle)
                     .fontWeight(.bold)
 
-                Text("\(count) student\(count == 1 ? "" : "s")")
+                Text(scopeSubtitle)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("Group Progress")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 8) {
-                    Text("\(groupOverall)%")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.accentColor)
-
-                    CircularProgressView(progress: Double(groupOverall) / 100.0)
-                        .frame(width: 50, height: 50)
-                }
-            }
-        }
-    }
-
-    private func studentModeHeader(student: Student) -> some View {
-        let groupName = student.group?.name ?? "Ungrouped"
-        let overallProgress = ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
-
-        let groupBinding = Binding<CohortGroup?>(
-            get: { student.group },
-            set: { newValue in
-                student.group = newValue
-                saveContext()
-                syncFilterToSelectedStudentIfNeeded()
-            }
-        )
-
-        return HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 64, height: 64)
-
-                Text(student.name.prefix(1).uppercased())
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(student.name)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-
-                Text(groupName)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                HStack(spacing: 10) {
-                    GroupPickerView(title: "Group", selectedGroup: groupBinding)
-
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedStudent = nil
-                        }
-                    } label: {
-                        Label("Clear Selection", systemImage: "xmark.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Return to cohort or group view based on the current filter")
-                }
             }
 
             Spacer()
@@ -351,15 +244,154 @@ struct StudentDetailView: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 8) {
-                    Text("\(overallProgress)%")
+                    Text("\(scopeOverallProgress)%")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(.accentColor)
 
-                    CircularProgressView(progress: Double(overallProgress) / 100.0)
+                    CircularProgressView(progress: Double(scopeOverallProgress) / 100.0)
                         .frame(width: 50, height: 50)
                 }
             }
         }
+    }
+
+    private var overviewBreakdownSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("A–E Summary")
+                    .font(.headline)
+
+                Spacer()
+
+                Text(scopeTitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(spacing: 10) {
+                ForEach(rootCategories) { category in
+                    overviewCategoryRow(category)
+                }
+            }
+        }
+    }
+
+    private func overviewCategoryRow(_ category: LearningObjective) -> some View {
+        let avg = ProgressCalculator.cohortObjectiveAverage(
+            objectiveCode: category.code,
+            students: breakdownStudents,
+            allObjectives: allObjectives
+        )
+
+        return HStack(spacing: 12) {
+            Text(category.code)
+                .font(.system(.caption, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(categoryColor(for: category.code))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.title)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+
+                Text("Average for \(category.code)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if isSwitchingScope {
+                Text("Select a student to see their progress")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            } else {
+                HStack(spacing: 10) {
+                    Text("\(avg)%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+
+                    CircularProgressView(progress: Double(avg) / 100.0)
+                        .frame(width: 28, height: 28)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private var emptyScopeTitle: String {
+        switch selectedGroupFilter {
+        case .all:
+            return "No Students Yet"
+        case .ungrouped:
+            return "No Students in Ungrouped"
+        case .group:
+            return "No Students in Group"
+        }
+    }
+
+    private var emptyScopeDescription: String {
+        switch selectedGroupFilter {
+        case .all:
+            return "Add a student to see overall progress."
+        case .ungrouped:
+            return "No students in this scope. Add a student or move students to Ungrouped."
+        case .group:
+            return "No students in this scope. Add a student or move students into this group."
+        }
+    }
+
+    private var legendView: some View {
+        HStack(spacing: 18) {
+            Text("Legend:")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 6) {
+                Text("✅")
+                Text("Complete (100%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: 6) {
+                Text("☑️")
+                Text("In Progress (1-99%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: 6) {
+                Text("⬜")
+                Text("Not Started (0%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Text("Click the status pill to edit progress")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 8)
     }
 
     private var studentBoardSection: some View {
@@ -371,20 +403,14 @@ struct StudentDetailView: View {
                 Spacer()
 
                 filterMenu
-
-                Button {
-                    showingAddSheet = true
-                } label: {
-                    Label("Add", systemImage: "plus")
-                }
-                .buttonStyle(.bordered)
+                    .buttonStyle(.bordered)
             }
 
             if filteredStudents.isEmpty {
                 ContentUnavailableView(
                     "No Students in Filter",
                     systemImage: "line.3.horizontal.decrease.circle",
-                    description: Text("Change the group filter to see students.")
+                    description: Text("Change the filter to see students.")
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -434,13 +460,8 @@ struct StudentDetailView: View {
 
     private var filterMenu: some View {
         Menu {
-            Button("All") {
-                selectedGroupFilter = .all
-                if selectedStudent == nil {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        selectedStudent = nil
-                    }
-                }
+            Button("Overall") {
+                beginScopeSwitch(to: .all, group: nil)
             }
 
             Divider()
@@ -448,24 +469,14 @@ struct StudentDetailView: View {
             if groups.isEmpty == false {
                 ForEach(groups) { group in
                     Button(group.name) {
-                        selectedGroupFilter = .group(group.id)
-                        if selectedStudent == nil {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                selectedStudent = nil
-                            }
-                        }
+                        beginScopeSwitch(to: .group(group.id), group: group)
                     }
                 }
                 Divider()
             }
 
             Button("Ungrouped") {
-                selectedGroupFilter = .ungrouped
-                if selectedStudent == nil {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        selectedStudent = nil
-                    }
-                }
+                beginScopeSwitch(to: .ungrouped, group: nil)
             }
         } label: {
             HStack(spacing: 8) {
@@ -496,7 +507,7 @@ struct StudentDetailView: View {
             )
         }
         .menuStyle(.borderlessButton)
-        .help("Filter student cards by group")
+        .help("Filter student cards by group (also sets the scope shown in header and A–E breakdown)")
     }
 
     private var addStudentCard: some View {
@@ -526,40 +537,35 @@ struct StudentDetailView: View {
         .help("Add a new student")
     }
 
-    private var legendView: some View {
-        HStack(spacing: 18) {
-            Text("Legend:")
-                .font(.caption)
-                .foregroundColor(.secondary)
+    private func beginScopeSwitch(to newFilter: GroupFilter, group: CohortGroup?) {
+        isSwitchingScope = true
 
-            HStack(spacing: 6) {
-                Text("✅")
-                Text("Complete (100%)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(spacing: 6) {
-                Text("☑️")
-                Text("In Progress (1-99%)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(spacing: 6) {
-                Text("⬜")
-                Text("Not Started (0%)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Text("Click the status pill to edit progress")
-                .font(.caption)
-                .foregroundColor(.secondary)
+        withAnimation(.easeInOut(duration: 0.15)) {
+            selectedGroupFilter = newFilter
+            selectedGroup = group
         }
-        .padding(.horizontal, 8)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            reconcileSelectedStudentForCurrentScope()
+            isSwitchingScope = false
+        }
+    }
+
+    private func reconcileSelectedStudentForCurrentScope() {
+        let scopeStudents = filteredStudents
+
+        guard scopeStudents.isEmpty == false else {
+            selectedStudent = nil
+            return
+        }
+
+        if let selectedStudent, scopeStudents.contains(where: { $0.id == selectedStudent.id }) {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedStudent = scopeStudents.first
+        }
     }
 
     private func addStudent(named name: String, group: CohortGroup?) {
@@ -574,7 +580,6 @@ struct StudentDetailView: View {
             withAnimation(.easeInOut(duration: 0.2)) {
                 selectedStudent = newStudent
             }
-            syncFilterToSelectedStudentIfNeeded()
         } catch {
             print("Failed to add student: \(error)")
         }
@@ -587,11 +592,11 @@ struct StudentDetailView: View {
 
         do {
             try modelContext.save()
+
             if deletingSelected {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    selectedStudent = students.first
+                    selectedStudent = filteredStudents.first
                 }
-                syncFilterToSelectedStudentIfNeeded()
             }
         } catch {
             print("Failed to delete student: \(error)")
@@ -602,8 +607,10 @@ struct StudentDetailView: View {
         student.group = group
         saveContext()
 
-        if selectedStudent?.id == student.id {
-            syncFilterToSelectedStudentIfNeeded()
+        if filteredStudents.contains(where: { $0.id == student.id }) == false, selectedStudent?.id == student.id {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedStudent = filteredStudents.first
+            }
         }
     }
 
@@ -615,29 +622,14 @@ struct StudentDetailView: View {
         }
     }
 
-    private func syncFilterToSelectedStudentIfNeeded() {
-        guard let selected = selectedStudent else { return }
-        guard filterContainsStudent(selected) == false else { return }
-
-        if let groupId = selected.group?.id {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                selectedGroupFilter = .group(groupId)
-            }
-        } else {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                selectedGroupFilter = .ungrouped
-            }
-        }
-    }
-
-    private func filterContainsStudent(_ s: Student) -> Bool {
-        switch selectedGroupFilter {
-        case .all:
-            return true
-        case .ungrouped:
-            return s.group == nil
-        case .group(let id):
-            return s.group?.id == id
+    private func categoryColor(for code: String) -> Color {
+        switch code {
+        case "A": return .blue
+        case "B": return .green
+        case "C": return .orange
+        case "D": return .purple
+        case "E": return .pink
+        default: return .gray
         }
     }
 
@@ -649,7 +641,7 @@ struct StudentDetailView: View {
         func title(groups: [CohortGroup]) -> String {
             switch self {
             case .all:
-                return "All"
+                return "Overall"
             case .ungrouped:
                 return "Ungrouped"
             case .group(let id):

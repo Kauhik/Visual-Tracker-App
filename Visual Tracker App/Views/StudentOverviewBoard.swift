@@ -179,34 +179,41 @@ struct StudentOverviewBoard: View {
                     .foregroundColor(.white)
             }
 
-            if isEditing {
-                TextField("", text: $editingStudentName)
-                    .textFieldStyle(.plain)
-                    .font(.body)
-                    .focused($renameFocusedStudentId, equals: student.id)
-                    .onSubmit {
-                        commitRename(for: student)
-                    }
-                    .onChange(of: renameFocusedStudentId) { _, newValue in
-                        if editingStudentId == student.id, newValue != student.id {
+            VStack(alignment: .leading, spacing: 2) {
+                if isEditing {
+                    TextField("", text: $editingStudentName)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .focused($renameFocusedStudentId, equals: student.id)
+                        .onSubmit {
                             commitRename(for: student)
                         }
-                    }
-                    .onExitCommand {
-                        cancelRename()
-                    }
-                    .onAppear {
-                        if editingStudentName.isEmpty {
-                            editingStudentName = student.name
+                        .onChange(of: renameFocusedStudentId) { _, newValue in
+                            if editingStudentId == student.id, newValue != student.id {
+                                commitRename(for: student)
+                            }
                         }
-                        DispatchQueue.main.async {
-                            renameFocusedStudentId = student.id
+                        .onExitCommand {
+                            cancelRename()
                         }
-                    }
-            } else {
-                Text(student.name)
-                    .font(.body)
-                    .foregroundColor(.primary)
+                        .onAppear {
+                            if editingStudentName.isEmpty {
+                                editingStudentName = student.name
+                            }
+                            DispatchQueue.main.async {
+                                renameFocusedStudentId = student.id
+                            }
+                        }
+                } else {
+                    Text(student.name)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                }
+
+                Text(student.group?.name ?? "Ungrouped")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
             }
 

@@ -6,6 +6,7 @@ struct ContentView: View {
     @Query(sort: \Student.createdAt) private var students: [Student]
 
     @State private var selectedStudent: Student?
+    @State private var selectedGroup: CohortGroup?
 
     var body: some View {
         NavigationSplitView {
@@ -20,7 +21,10 @@ struct ContentView: View {
                         description: Text("Add a student to start tracking progress.")
                     )
                 } else {
-                    StudentDetailView(selectedStudent: $selectedStudent)
+                    StudentDetailView(
+                        selectedStudent: $selectedStudent,
+                        selectedGroup: $selectedGroup
+                    )
                 }
             }
             .navigationTitle("Visual Tracker")
@@ -59,6 +63,7 @@ struct ContentView: View {
             try modelContext.save()
 
             selectedStudent = nil
+            selectedGroup = nil
 
             SeedDataService.seedIfNeeded(modelContext: modelContext)
 
