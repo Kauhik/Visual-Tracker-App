@@ -12,7 +12,9 @@ import SwiftData
 struct Visual_Tracker_AppApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Student.self,
+            LearningObjective.self,
+            ObjectiveProgress.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -26,7 +28,12 @@ struct Visual_Tracker_AppApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    SeedDataService.seedIfNeeded(modelContext: sharedModelContainer.mainContext)
+                }
         }
         .modelContainer(sharedModelContainer)
+        .windowStyle(.automatic)
+        .defaultSize(width: 1200, height: 800)
     }
 }

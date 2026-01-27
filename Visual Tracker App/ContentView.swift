@@ -10,50 +10,53 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
+    @Query private var students: [Student]
+    
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        NavigationStack {
+            Group {
+                if let firstStudent = students.first {
+                    StudentDetailView(student: firstStudent)
+                } else {
+                    ContentUnavailableView(
+                        "No Students",
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        description: Text("No student data found. The app will seed sample data on first launch.")
+                    )
                 }
-                .onDelete(perform: deleteItems)
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
+            .navigationTitle("Visual Tracker")
             .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Reset Data") {
+                            resetData()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
-        } detail: {
-            Text("Select an item")
         }
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    
+    private func resetData() {
+        // Delete all existing data
+        do {
+            try modelContext.delete(model: ObjectiveProgress.self)
+            try modelContext.delete(model: Student.self)
+            try modelContext.delete(model: LearningObjective.self)
+            try modelContext.save()
+            
+            // Re-seed
+            SeedDataService.seedIfNeeded(modelContext: modelContext)
+        } catch {
+            print("Failed to reset data: \(error)")
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self], inMemory: true)
 }
