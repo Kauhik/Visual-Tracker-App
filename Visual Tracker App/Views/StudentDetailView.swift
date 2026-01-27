@@ -439,7 +439,7 @@ struct StudentDetailView: View {
                                     move(student: boardStudent, to: group)
                                 }
                             )
-                            .frame(width: 210)
+                            .frame(width: 240)
                         }
 
                         addStudentCard

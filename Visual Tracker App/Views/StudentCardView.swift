@@ -11,8 +11,8 @@ struct StudentCardView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(spacing: 10) {
                     avatar
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -28,22 +28,22 @@ struct StudentCardView: View {
 
                     ZStack {
                         CircularProgressView(progress: Double(overallProgress) / 100.0)
-                            .frame(width: 30, height: 30)
+                            .frame(width: 34, height: 34)
 
                         Text("\(overallProgress)%")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.primary)
                     }
                 }
             }
-            .padding(10)
+            .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.8) : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.9) : Color.secondary.opacity(0.35), lineWidth: isSelected ? 2 : 1)
             )
             .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
         }
@@ -79,10 +79,10 @@ struct StudentCardView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 36, height: 36)
+                .frame(width: 40, height: 40)
 
             Text(student.name.prefix(1).uppercased())
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.system(size: 19, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
         }
     }
