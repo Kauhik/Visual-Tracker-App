@@ -11,6 +11,7 @@ struct StudentOverviewBoard: View {
     @Binding var selectedStudent: Student?
 
     @State private var showingAddSheet: Bool = false
+    @State private var studentToEdit: Student?
     @State private var showingManageGroups: Bool = false
     @State private var studentPendingDelete: Student?
     @State private var searchText: String = ""
@@ -48,8 +49,10 @@ struct StudentOverviewBoard: View {
             let groupName = student.group?.name.lowercased() ?? ""
             let groupMatches = groupName.contains(query)
             let ungroupedMatches = query.contains("ungrouped") && student.group == nil
+            let sessionMatches = student.session.rawValue.lowercased().contains(query)
+            let domainMatches = student.domain.rawValue.lowercased().contains(query)
 
-            return nameMatches || groupMatches || ungroupedMatches
+            return nameMatches || groupMatches || ungroupedMatches || sessionMatches || domainMatches
         }
     }
 
@@ -108,6 +111,10 @@ struct StudentOverviewBoard: View {
                         studentRow(student)
                             .tag(student as Student?)
                             .contextMenu {
+                                Button("Edit Student…") {
+                                    beginEdit(student)
+                                }
+
                                 Button("Rename") {
                                     beginRename(student)
                                 }
@@ -128,8 +135,13 @@ struct StudentOverviewBoard: View {
             .listStyle(.sidebar)
         }
         .sheet(isPresented: $showingAddSheet) {
-            AddStudentSheet { name, group in
-                addStudent(named: name, group: group)
+            AddStudentSheet { name, group, session, domain, customProperties in
+                addStudent(named: name, group: group, session: session, domain: domain, customProperties: customProperties)
+            }
+        }
+        .sheet(item: $studentToEdit) { student in
+            AddStudentSheet(studentToEdit: student) { name, group, session, domain, customProperties in
+                saveEditedStudent(student, name: name, group: group, session: session, domain: domain, customProperties: customProperties)
             }
         }
         .sheet(isPresented: $showingManageGroups) {
@@ -272,10 +284,28 @@ struct StudentOverviewBoard: View {
                         .lineLimit(1)
                 }
 
-                Text(student.group?.name ?? "Ungrouped")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(student.group?.name ?? "Ungrouped")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.6))
+
+                    Text(student.session.rawValue)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundColor(.secondary.opacity(0.6))
+
+                    Text(student.domain.rawValue)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
@@ -367,18 +397,69 @@ struct StudentOverviewBoard: View {
         .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
     }
 
-    private func addStudent(named name: String, group: CohortGroup?) {
+    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 
-        let newStudent = Student(name: trimmed, group: group)
+        let newStudent = Student(name: trimmed, group: group, session: session, domain: domain)
         modelContext.insert(newStudent)
+
+        // Add custom properties
+        for (index, row) in customProperties.enumerated() {
+            let property = StudentCustomProperty(
+                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
+                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: index
+            )
+            property.student = newStudent
+            modelContext.insert(property)
+            newStudent.customProperties.append(property)
+        }
 
         do {
             try modelContext.save()
             selectedStudent = newStudent
         } catch {
             print("Failed to add student: \(error)")
+        }
+    }
+
+    private func beginEdit(_ student: Student) {
+        studentToEdit = student
+    }
+
+    private func saveEditedStudent(_ student: Student, name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+
+        student.name = trimmed
+        student.group = group
+        student.session = session
+        student.domain = domain
+
+        // Remove existing custom properties
+        for existingProperty in student.customProperties {
+            modelContext.delete(existingProperty)
+        }
+        student.customProperties.removeAll()
+
+        // Add updated custom properties
+        for (index, row) in customProperties.enumerated() {
+            let property = StudentCustomProperty(
+                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
+                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: index
+            )
+            property.student = student
+            modelContext.insert(property)
+            student.customProperties.append(property)
+        }
+
+        do {
+            try modelContext.save()
+            studentToEdit = nil
+        } catch {
+            print("Failed to save edited student: \(error)")
         }
     }
 

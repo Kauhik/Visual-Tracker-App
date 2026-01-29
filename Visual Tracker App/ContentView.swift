@@ -78,5 +78,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self, CohortGroup.self, CategoryLabel.self], inMemory: true)
+        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self, CohortGroup.self, CategoryLabel.self, StudentCustomProperty.self], inMemory: true)
 }

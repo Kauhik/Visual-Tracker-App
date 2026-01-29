@@ -148,8 +148,8 @@ struct StudentDetailView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingAddSheet) {
-            AddStudentSheet { name, group in
-                addStudent(named: name, group: group)
+            AddStudentSheet { name, group, session, domain, customProperties in
+                addStudent(named: name, group: group, session: session, domain: domain, customProperties: customProperties)
             }
         }
         .sheet(item: $editingCategoryTarget) { target in
@@ -593,12 +593,24 @@ struct StudentDetailView: View {
         }
     }
 
-    private func addStudent(named name: String, group: CohortGroup?) {
+    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 
-        let newStudent = Student(name: trimmed, group: group)
+        let newStudent = Student(name: trimmed, group: group, session: session, domain: domain)
         modelContext.insert(newStudent)
+
+        // Add custom properties
+        for (index, row) in customProperties.enumerated() {
+            let property = StudentCustomProperty(
+                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
+                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: index
+            )
+            property.student = newStudent
+            modelContext.insert(property)
+            newStudent.customProperties.append(property)
+        }
 
         do {
             try modelContext.save()

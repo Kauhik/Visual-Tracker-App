@@ -99,6 +99,22 @@ struct StudentCardView: View {
             Text(name)
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
+            Text("•")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.6))
+
+            Text(student.session.rawValue)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            Text("•")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.6))
+
+            Text(student.domain.rawValue)
+                .font(.caption2)
+                .foregroundColor(.secondary)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
