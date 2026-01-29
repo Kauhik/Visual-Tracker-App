@@ -10,12 +10,15 @@ struct StudentDetailView: View {
     @Query(sort: \Student.createdAt) private var students: [Student]
     @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
     @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
+    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
 
     @State private var showingAddSheet: Bool = false
     @State private var studentPendingDelete: Student?
 
     @State private var selectedGroupFilter: GroupFilter = .all
     @State private var isSwitchingScope: Bool = false
+
+    @State private var editingCategoryTarget: CategoryEditTarget?
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -148,6 +151,12 @@ struct StudentDetailView: View {
             AddStudentSheet { name, group in
                 addStudent(named: name, group: group)
             }
+        }
+        .sheet(item: $editingCategoryTarget) { target in
+            EditCategoryTitleSheet(
+                code: target.code,
+                fallbackTitle: target.fallbackTitle
+            )
         }
         .confirmationDialog(
             "Delete Student",
@@ -298,10 +307,15 @@ struct StudentDetailView: View {
                 )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(category.title)
+                Text(categoryDisplayTitle(for: category))
                     .font(.subheadline)
                     .foregroundColor(.primary)
                     .lineLimit(2)
+                    .contextMenu {
+                        Button("Edit Title...") {
+                            editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
+                        }
+                    }
 
                 Text("Average for \(category.code)")
                     .font(.caption2)
@@ -658,6 +672,25 @@ struct StudentDetailView: View {
             case .group(let id):
                 return groups.first(where: { $0.id == id })?.name ?? "Group"
             }
+        }
+    }
+
+    private func categoryDisplayTitle(for objective: LearningObjective) -> String {
+        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+            return label.title
+        }
+        return objective.title
+    }
+
+    private struct CategoryEditTarget: Identifiable {
+        let id: String
+        let code: String
+        let fallbackTitle: String
+
+        init(code: String, fallbackTitle: String) {
+            self.id = code
+            self.code = code
+            self.fallbackTitle = fallbackTitle
         }
     }
 

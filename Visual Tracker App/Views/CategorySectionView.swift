@@ -1,10 +1,3 @@
-//
-//  CategorySectionView.swift
-//  Visual Tracker App
-//
-//  Created by Kaushik Manian on 27/1/26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,36 +5,39 @@ struct CategorySectionView: View {
     let categoryObjective: LearningObjective
     let student: Student
     let allObjectives: [LearningObjective]
-    
+
+    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
+
     @State private var isExpanded: Bool = true
-    
+    @State private var editingTarget: CategoryEditTarget?
+
     private var childObjectives: [LearningObjective] {
-        return allObjectives
+        allObjectives
             .filter { $0.parentCode == categoryObjective.code }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
-    
+
     private var aggregatePercentage: Int {
-        return calculateCategoryPercentage(for: categoryObjective)
+        calculateCategoryPercentage(for: categoryObjective)
     }
-    
+
     private func calculateCategoryPercentage(for objective: LearningObjective) -> Int {
         let children = allObjectives.filter { $0.parentCode == objective.code }
         if children.isEmpty {
             return student.completionPercentage(for: objective.code)
         }
-        
+
         var total = 0
         for child in children {
             total += calculateCategoryPercentage(for: child)
         }
         return children.count > 0 ? total / children.count : 0
     }
-    
+
     private var aggregateStatus: ProgressStatus {
-           return ObjectiveProgress.calculateStatus(from: aggregatePercentage)
-       }
-    
+        ObjectiveProgress.calculateStatus(from: aggregatePercentage)
+    }
+
     private var categoryColor: Color {
         switch categoryObjective.code {
         case "A": return .blue
@@ -52,7 +48,7 @@ struct CategorySectionView: View {
         default: return .gray
         }
     }
-    
+
     private var formulaDisplay: String? {
         if categoryObjective.code == "A" {
             let a1 = student.completionPercentage(for: "A.1")
@@ -64,23 +60,20 @@ struct CategorySectionView: View {
         }
         return nil
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Category Header
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
                 }
             }) {
                 HStack(spacing: 12) {
-                    // Expand/Collapse indicator
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .frame(width: 16)
-                    
-                    // Category badge
+
                     Text(categoryObjective.code)
                         .font(.system(.headline, design: .rounded))
                         .fontWeight(.bold)
@@ -91,20 +84,26 @@ struct CategorySectionView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(categoryColor)
                         )
-                    
-                    // Title
-                    Text(categoryObjective.title)
+
+                    Text(categoryDisplayTitle(for: categoryObjective))
                         .font(.headline)
                         .foregroundColor(.primary)
                         .lineLimit(2)
-                    
+                        .contextMenu {
+                            Button("Edit Title...") {
+                                editingTarget = CategoryEditTarget(
+                                    code: categoryObjective.code,
+                                    fallbackTitle: categoryObjective.title
+                                )
+                            }
+                        }
+
                     Spacer()
-                    
-                    // Status and percentage
+
                     HStack(spacing: 8) {
                         Text(aggregateStatus.indicator)
                             .font(.title2)
-                        
+
                         Text("\(aggregatePercentage)%")
                             .font(.system(.headline, design: .monospaced))
                             .foregroundColor(.secondary)
@@ -118,8 +117,7 @@ struct CategorySectionView: View {
                 )
             }
             .buttonStyle(.plain)
-            
-            // Formula display for Category A
+
             if let formula = formulaDisplay, isExpanded {
                 HStack {
                     Spacer()
@@ -130,8 +128,7 @@ struct CategorySectionView: View {
                         .padding(.top, 4)
                 }
             }
-            
-            // Expanded content
+
             if isExpanded {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(childObjectives) { child in
@@ -147,6 +144,31 @@ struct CategorySectionView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 12)
             }
+        }
+        .sheet(item: $editingTarget) { target in
+            EditCategoryTitleSheet(
+                code: target.code,
+                fallbackTitle: target.fallbackTitle
+            )
+        }
+    }
+
+    private func categoryDisplayTitle(for objective: LearningObjective) -> String {
+        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+            return label.title
+        }
+        return objective.title
+    }
+
+    private struct CategoryEditTarget: Identifiable {
+        let id: String
+        let code: String
+        let fallbackTitle: String
+
+        init(code: String, fallbackTitle: String) {
+            self.id = code
+            self.code = code
+            self.fallbackTitle = fallbackTitle
         }
     }
 }

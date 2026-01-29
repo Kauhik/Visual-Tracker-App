@@ -11,7 +11,8 @@ struct Visual_Tracker_AppApp: App {
                 Student.self,
                 LearningObjective.self,
                 ObjectiveProgress.self,
-                CohortGroup.self
+                CohortGroup.self,
+                CategoryLabel.self
             ])
 
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

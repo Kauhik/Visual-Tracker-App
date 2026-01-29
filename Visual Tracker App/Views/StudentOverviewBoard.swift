@@ -6,6 +6,7 @@ struct StudentOverviewBoard: View {
 
     @Query(sort: \Student.createdAt) private var students: [Student]
     @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
+    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
 
     @Binding var selectedStudent: Student?
 
@@ -21,6 +22,8 @@ struct StudentOverviewBoard: View {
 
     @State private var showingRenameError: Bool = false
     @State private var renameErrorMessage: String = ""
+
+    @State private var editingCategoryTarget: CategoryEditTarget?
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -131,6 +134,12 @@ struct StudentOverviewBoard: View {
         }
         .sheet(isPresented: $showingManageGroups) {
             ManageGroupsSheet()
+        }
+        .sheet(item: $editingCategoryTarget) { target in
+            EditCategoryTitleSheet(
+                code: target.code,
+                fallbackTitle: target.fallbackTitle
+            )
         }
         .confirmationDialog(
             "Delete Student",
@@ -333,10 +342,15 @@ struct StudentOverviewBoard: View {
                         .fill(categoryColor(for: category.code))
                 )
 
-            Text(category.title)
+            Text(categoryDisplayTitle(for: category))
                 .font(.caption)
                 .foregroundColor(.primary)
                 .lineLimit(1)
+                .contextMenu {
+                    Button("Edit Title...") {
+                        editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
+                    }
+                }
 
             Spacer()
 
@@ -427,6 +441,25 @@ struct StudentOverviewBoard: View {
             DispatchQueue.main.async {
                 renameFocusedStudentId = student.id
             }
+        }
+    }
+
+    private func categoryDisplayTitle(for objective: LearningObjective) -> String {
+        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+            return label.title
+        }
+        return objective.title
+    }
+
+    private struct CategoryEditTarget: Identifiable {
+        let id: String
+        let code: String
+        let fallbackTitle: String
+
+        init(code: String, fallbackTitle: String) {
+            self.id = code
+            self.code = code
+            self.fallbackTitle = fallbackTitle
         }
     }
 

@@ -11,6 +11,9 @@ class SeedDataService {
         let groupDescriptor = FetchDescriptor<CohortGroup>()
         let existingGroups = (try? modelContext.fetch(groupDescriptor)) ?? []
 
+        let labelDescriptor = FetchDescriptor<CategoryLabel>()
+        let existingLabels = (try? modelContext.fetch(labelDescriptor)) ?? []
+
         if existingGroups.isEmpty {
             seedSampleGroups(modelContext: modelContext)
         }
@@ -20,6 +23,11 @@ class SeedDataService {
             seedSampleStudent(modelContext: modelContext)
             try? modelContext.save()
         }
+
+        if existingLabels.isEmpty || isMissingAnyCategoryLabels(existingLabels) {
+            seedCategoryLabels(modelContext: modelContext)
+            try? modelContext.save()
+        }
     }
 
     private static func seedLearningObjectives(modelContext: ModelContext) {
@@ -27,6 +35,46 @@ class SeedDataService {
         for objective in objectives {
             modelContext.insert(objective)
         }
+    }
+
+    private static func isMissingAnyCategoryLabels(_ labels: [CategoryLabel]) -> Bool {
+        let existingKeys = Set(labels.map { $0.key })
+        for code in ["A", "B", "C", "D", "E"] {
+            if existingKeys.contains(code) == false {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func seedCategoryLabels(modelContext: ModelContext) {
+        let existingObjectives = (try? modelContext.fetch(FetchDescriptor<LearningObjective>())) ?? []
+        let existingLabels = (try? modelContext.fetch(FetchDescriptor<CategoryLabel>())) ?? []
+
+        let existingKeys = Set(existingLabels.map { $0.key })
+
+        for code in ["A", "B", "C", "D", "E"] {
+            guard existingKeys.contains(code) == false else { continue }
+
+            let migratedTitle = existingObjectives
+                .first(where: { $0.code == code && $0.parentCode == nil })?
+                .title
+
+            let titleToUse = migratedTitle ?? defaultCategoryTitles[code] ?? code
+
+            let label = CategoryLabel(code: code, title: titleToUse)
+            modelContext.insert(label)
+        }
+    }
+
+    private static var defaultCategoryTitles: [String: String] {
+        return [
+            "A": "Able to apply 100% of core LOs for chosen path",
+            "B": "Able to LUR - Learn Unlearn Relearn",
+            "C": "Able to analyze and create solutions based on data",
+            "D": "Able to create positive influence and empower each other",
+            "E": "Able to identify pathways & requirements toward career aspiration"
+        ]
     }
 
     private static func seedSampleGroups(modelContext: ModelContext) {
