@@ -13,6 +13,7 @@ struct StudentOverviewBoard: View {
     @State private var showingAddSheet: Bool = false
     @State private var studentToEdit: Student?
     @State private var showingManageGroups: Bool = false
+    @State private var showingManageDomains: Bool = false
     @State private var studentPendingDelete: Student?
     @State private var searchText: String = ""
 
@@ -50,9 +51,11 @@ struct StudentOverviewBoard: View {
             let groupMatches = groupName.contains(query)
             let ungroupedMatches = query.contains("ungrouped") && student.group == nil
             let sessionMatches = student.session.rawValue.lowercased().contains(query)
-            let domainMatches = student.domain.rawValue.lowercased().contains(query)
+            let domainName = student.domain?.name.lowercased() ?? ""
+            let domainMatches = domainName.contains(query)
+            let noDomainMatches = (query.contains("no domain") || query.contains("nodomain")) && student.domain == nil
 
-            return nameMatches || groupMatches || ungroupedMatches || sessionMatches || domainMatches
+            return nameMatches || groupMatches || ungroupedMatches || sessionMatches || domainMatches || noDomainMatches
         }
     }
 
@@ -91,6 +94,22 @@ struct StudentOverviewBoard: View {
                         HStack(spacing: 10) {
                             Image(systemName: "folder.badge.gearshape")
                             Text("Manage Groups")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        showingManageDomains = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "tag")
+                            Text("Manage Domains")
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
@@ -146,6 +165,9 @@ struct StudentOverviewBoard: View {
         }
         .sheet(isPresented: $showingManageGroups) {
             ManageGroupsSheet()
+        }
+        .sheet(isPresented: $showingManageDomains) {
+            ManageDomainsSheet()
         }
         .sheet(item: $editingCategoryTarget) { target in
             EditCategoryTitleSheet(
@@ -302,7 +324,7 @@ struct StudentOverviewBoard: View {
                         .font(.caption2)
                         .foregroundColor(.secondary.opacity(0.6))
 
-                    Text(student.domain.rawValue)
+                    Text(student.domain?.name ?? "No Domain")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -397,7 +419,7 @@ struct StudentOverviewBoard: View {
         .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
     }
 
-    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
+    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 
@@ -428,7 +450,7 @@ struct StudentOverviewBoard: View {
         studentToEdit = student
     }
 
-    private func saveEditedStudent(_ student: Student, name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
+    private func saveEditedStudent(_ student: Student, name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 

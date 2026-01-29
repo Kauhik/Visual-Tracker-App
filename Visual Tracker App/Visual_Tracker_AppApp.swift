@@ -12,6 +12,7 @@ struct Visual_Tracker_AppApp: App {
                 LearningObjective.self,
                 ObjectiveProgress.self,
                 CohortGroup.self,
+                Domain.self,
                 CategoryLabel.self,
                 StudentCustomProperty.self
             ])

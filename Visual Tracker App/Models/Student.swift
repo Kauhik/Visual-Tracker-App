@@ -6,18 +6,12 @@ enum Session: String, Codable, CaseIterable {
     case afternoon = "Afternoon"
 }
 
-enum Domain: String, Codable, CaseIterable {
-    case design = "Design"
-    case tech = "Tech"
-}
-
 @Model
 final class Student {
     @Attribute(.unique) var id: UUID
     var name: String
     var createdAt: Date
     var session: Session
-    var domain: Domain
 
     @Relationship(deleteRule: .cascade, inverse: \ObjectiveProgress.student)
     var progressRecords: [ObjectiveProgress] = []
@@ -25,10 +19,16 @@ final class Student {
     @Relationship(deleteRule: .cascade, inverse: \StudentCustomProperty.student)
     var customProperties: [StudentCustomProperty] = []
 
-    // Keep this as a plain property to avoid SwiftData relationship macro circular expansion
+    // Keep these as plain properties to avoid relationship macro circular expansion issues
     var group: CohortGroup?
+    var domain: Domain?
 
-    init(name: String, group: CohortGroup? = nil, session: Session = .morning, domain: Domain = .tech) {
+    init(
+        name: String,
+        group: CohortGroup? = nil,
+        session: Session = .morning,
+        domain: Domain? = nil
+    ) {
         self.id = UUID()
         self.name = name
         self.createdAt = Date()

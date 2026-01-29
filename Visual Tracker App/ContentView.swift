@@ -57,9 +57,12 @@ struct ContentView: View {
     private func resetData() {
         do {
             try modelContext.delete(model: ObjectiveProgress.self)
+            try modelContext.delete(model: StudentCustomProperty.self)
             try modelContext.delete(model: Student.self)
             try modelContext.delete(model: LearningObjective.self)
+            try modelContext.delete(model: CategoryLabel.self)
             try modelContext.delete(model: CohortGroup.self)
+            try modelContext.delete(model: Domain.self)
             try modelContext.save()
 
             selectedStudent = nil
@@ -78,5 +81,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self, CohortGroup.self, CategoryLabel.self, StudentCustomProperty.self], inMemory: true)
+        .modelContainer(for: [Student.self, LearningObjective.self, ObjectiveProgress.self, CohortGroup.self, Domain.self, CategoryLabel.self, StudentCustomProperty.self], inMemory: true)
 }

@@ -18,20 +18,21 @@ struct AddStudentSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
+    @Query(sort: \Domain.name) private var domains: [Domain]
 
     @State private var name: String = ""
     @State private var selectedGroup: CohortGroup? = nil
     @State private var selectedSession: Session = .morning
-    @State private var selectedDomain: Domain = .tech
+    @State private var selectedDomain: Domain? = nil
     @State private var customPropertyRows: [CustomPropertyRow] = []
 
     @State private var showingValidationError: Bool = false
     @State private var validationErrorMessage: String = ""
 
     let studentToEdit: Student?
-    let onSave: (String, CohortGroup?, Session, Domain, [CustomPropertyRow]) -> Void
+    let onSave: (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void
 
-    init(studentToEdit: Student? = nil, onSave: @escaping (String, CohortGroup?, Session, Domain, [CustomPropertyRow]) -> Void) {
+    init(studentToEdit: Student? = nil, onSave: @escaping (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void) {
         self.studentToEdit = studentToEdit
         self.onSave = onSave
     }
@@ -56,12 +57,10 @@ struct AddStudentSheet: View {
         let keys = customPropertyRows.map { $0.key.trimmingCharacters(in: .whitespacesAndNewlines) }
         let nonEmptyKeys = keys.filter { !$0.isEmpty }
 
-        // All keys with content must be non-empty and unique
         if customPropertyRows.isEmpty {
             return true
         }
 
-        // If any row has a value but empty key, that's invalid
         for row in customPropertyRows {
             let trimmedKey = row.key.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedValue = row.value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,7 +69,6 @@ struct AddStudentSheet: View {
             }
         }
 
-        // Check for duplicate non-empty keys
         return nonEmptyKeys.count == Set(nonEmptyKeys).count
     }
 
@@ -107,8 +105,12 @@ struct AddStudentSheet: View {
                     }
 
                     Picker("Domain", selection: $selectedDomain) {
-                        ForEach(Domain.allCases, id: \.self) { domain in
-                            Text(domain.rawValue).tag(domain)
+                        Text("No Domain").tag(nil as Domain?)
+                        if domains.isEmpty == false {
+                            Divider()
+                            ForEach(domains) { domain in
+                                Text(domain.name).tag(domain as Domain?)
+                            }
                         }
                     }
                 }
@@ -201,7 +203,6 @@ struct AddStudentSheet: View {
             return false
         }
 
-        // Check for duplicate keys
         let keys = customPropertyRows
             .map { $0.key.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -212,7 +213,6 @@ struct AddStudentSheet: View {
             return false
         }
 
-        // Check for empty keys with values
         for row in customPropertyRows {
             let trimmedKey = row.key.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedValue = row.value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -223,7 +223,6 @@ struct AddStudentSheet: View {
             }
         }
 
-        // Filter out completely empty rows before saving
         let validRows = customPropertyRows.filter { row in
             let trimmedKey = row.key.trimmingCharacters(in: .whitespacesAndNewlines)
             return !trimmedKey.isEmpty

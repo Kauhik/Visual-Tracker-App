@@ -593,7 +593,7 @@ struct StudentDetailView: View {
         }
     }
 
-    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain, customProperties: [CustomPropertyRow]) {
+    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
 

@@ -11,11 +11,18 @@ class SeedDataService {
         let groupDescriptor = FetchDescriptor<CohortGroup>()
         let existingGroups = (try? modelContext.fetch(groupDescriptor)) ?? []
 
+        let domainDescriptor = FetchDescriptor<Domain>()
+        let existingDomains = (try? modelContext.fetch(domainDescriptor)) ?? []
+
         let labelDescriptor = FetchDescriptor<CategoryLabel>()
         let existingLabels = (try? modelContext.fetch(labelDescriptor)) ?? []
 
         if existingGroups.isEmpty {
             seedSampleGroups(modelContext: modelContext)
+        }
+
+        if existingDomains.isEmpty {
+            seedSampleDomains(modelContext: modelContext)
         }
 
         if existingObjectives.isEmpty {
@@ -90,12 +97,27 @@ class SeedDataService {
         }
     }
 
+    private static func seedSampleDomains(modelContext: ModelContext) {
+        let domains = [
+            Domain(name: "Design", colorHex: "#F97316"),
+            Domain(name: "Tech", colorHex: "#8B5CF6")
+        ]
+
+        for domain in domains {
+            modelContext.insert(domain)
+        }
+    }
+
     private static func seedSampleStudent(modelContext: ModelContext) {
         let groupDescriptor = FetchDescriptor<CohortGroup>()
         let groups = (try? modelContext.fetch(groupDescriptor)) ?? []
         let defaultGroup = groups.first(where: { $0.name == "iOS" })
 
-        let student = Student(name: "Kaushik Manian", group: defaultGroup)
+        let domainDescriptor = FetchDescriptor<Domain>()
+        let domains = (try? modelContext.fetch(domainDescriptor)) ?? []
+        let defaultDomain = domains.first(where: { $0.name.lowercased() == "tech" })
+
+        let student = Student(name: "Kaushik Manian", group: defaultGroup, domain: defaultDomain)
         modelContext.insert(student)
 
         let progressA1 = ObjectiveProgress(objectiveCode: "A.1", completionPercentage: 100)

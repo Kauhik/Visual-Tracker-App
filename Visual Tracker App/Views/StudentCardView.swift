@@ -104,7 +104,8 @@ struct StudentCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
 
-        let sessionPill = Text("\(student.session.rawValue) • \(student.domain.rawValue)")
+        let domainName = student.domain?.name ?? "No Domain"
+        let sessionPill = Text("\(student.session.rawValue) • \(domainName)")
             .font(.caption2)
             .foregroundColor(.secondary)
             .lineLimit(2)
