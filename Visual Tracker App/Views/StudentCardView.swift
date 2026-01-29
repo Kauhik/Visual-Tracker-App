@@ -21,7 +21,7 @@ struct StudentCardView: View {
                             .foregroundColor(.primary)
                             .lineLimit(1)
 
-                        groupBadge
+                        metadataBadges
                     }
 
                     Spacer()
@@ -87,11 +87,11 @@ struct StudentCardView: View {
         }
     }
 
-    private var groupBadge: some View {
+    private var metadataBadges: some View {
         let name = student.group?.name ?? "Ungrouped"
         let color = Color(hex: student.group?.colorHex) ?? Color.secondary.opacity(0.25)
 
-        return HStack(spacing: 6) {
+        let groupPill = HStack(spacing: 6) {
             Circle()
                 .fill(color)
                 .frame(width: 8, height: 8)
@@ -99,32 +99,41 @@ struct StudentCardView: View {
             Text(name)
                 .font(.caption2)
                 .foregroundColor(.secondary)
-
-            Text("•")
-                .font(.caption2)
-                .foregroundColor(.secondary.opacity(0.6))
-
-            Text(student.session.rawValue)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-
-            Text("•")
-                .font(.caption2)
-                .foregroundColor(.secondary.opacity(0.6))
-
-            Text(student.domain.rawValue)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
+
+        let sessionPill = Text("\(student.session.rawValue) • \(student.domain.rawValue)")
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                pill(groupPill)
+                pill(sessionPill)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                pill(groupPill)
+                pill(sessionPill)
+            }
+        }
+    }
+
+    private func pill<Content: View>(_ content: Content) -> some View {
+        content
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
     }
 }
