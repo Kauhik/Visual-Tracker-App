@@ -1,16 +1,10 @@
 import SwiftUI
-import SwiftData
 
 struct StudentDetailView: View {
     @Binding var selectedStudent: Student?
     @Binding var selectedGroup: CohortGroup?
 
-    @Environment(\.modelContext) private var modelContext
-
-    @Query(sort: \Student.createdAt) private var students: [Student]
-    @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
-    @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
-    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
+    @EnvironmentObject private var store: CloudKitStore
 
     @State private var showingAddSheet: Bool = false
     @State private var studentPendingDelete: Student?
@@ -19,6 +13,11 @@ struct StudentDetailView: View {
     @State private var isSwitchingScope: Bool = false
 
     @State private var editingCategoryTarget: CategoryEditTarget?
+
+    private var students: [Student] { store.students }
+    private var allObjectives: [LearningObjective] { store.learningObjectives }
+    private var groups: [CohortGroup] { store.groups }
+    private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -179,6 +178,12 @@ struct StudentDetailView: View {
         } message: {
             if let studentPendingDelete {
                 Text("Delete \(studentPendingDelete.name)? This action cannot be undone.")
+            }
+        }
+        .task(id: selectedStudent?.id) {
+            if let selectedStudent {
+                await store.loadProgressIfNeeded(for: selectedStudent)
+                await store.loadCustomPropertiesIfNeeded(for: selectedStudent)
             }
         }
     }
@@ -454,6 +459,9 @@ struct StudentDetailView: View {
                                 }
                             )
                             .frame(width: 240)
+                            .task {
+                                await store.loadProgressIfNeeded(for: boardStudent)
+                            }
                         }
 
                         addStudentCard
@@ -596,66 +604,43 @@ struct StudentDetailView: View {
     private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-
-        let newStudent = Student(name: trimmed, group: group, session: session, domain: domain)
-        modelContext.insert(newStudent)
-
-        // Add custom properties
-        for (index, row) in customProperties.enumerated() {
-            let property = StudentCustomProperty(
-                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
-                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
-                sortOrder: index
-            )
-            property.student = newStudent
-            modelContext.insert(property)
-            newStudent.customProperties.append(property)
-        }
-
-        do {
-            try modelContext.save()
-            withAnimation(.easeInOut(duration: 0.2)) {
-                selectedStudent = newStudent
+        Task {
+            if let newStudent = await store.addStudent(
+                name: trimmed,
+                group: group,
+                session: session,
+                domain: domain,
+                customProperties: customProperties
+            ) {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedStudent = newStudent
+                }
             }
-        } catch {
-            print("Failed to add student: \(error)")
         }
     }
 
     private func deleteStudent(_ studentToDelete: Student) {
         let deletingSelected = selectedStudent?.id == studentToDelete.id
-
-        modelContext.delete(studentToDelete)
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.deleteStudent(studentToDelete)
 
             if deletingSelected {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     selectedStudent = filteredStudents.first
                 }
             }
-        } catch {
-            print("Failed to delete student: \(error)")
         }
     }
 
     private func move(student: Student, to group: CohortGroup?) {
-        student.group = group
-        saveContext()
+        Task {
+            await store.moveStudent(student, to: group)
 
-        if filteredStudents.contains(where: { $0.id == student.id }) == false, selectedStudent?.id == student.id {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                selectedStudent = filteredStudents.first
+            if filteredStudents.contains(where: { $0.id == student.id }) == false, selectedStudent?.id == student.id {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedStudent = filteredStudents.first
+                }
             }
-        }
-    }
-
-    private func saveContext() {
-        do {
-            try modelContext.save()
-        } catch {
-            print("Failed to save context: \(error)")
         }
     }
 

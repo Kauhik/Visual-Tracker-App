@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 
 struct ObjectiveRowView: View {
     let objective: LearningObjective
@@ -7,7 +6,7 @@ struct ObjectiveRowView: View {
     let allObjectives: [LearningObjective]
     let indentLevel: Int
 
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var store: CloudKitStore
     @State private var showingEditor: Bool = false
 
     private var progress: ObjectiveProgress? {
@@ -190,19 +189,8 @@ struct ObjectiveRowView: View {
     }
 
     private func updateProgress(_ newPercentage: Int) {
-        if let existingProgress = progress {
-            existingProgress.updateCompletion(newPercentage)
-        } else {
-            let newProgress = ObjectiveProgress(objectiveCode: objective.code, completionPercentage: newPercentage)
-            newProgress.student = student
-            modelContext.insert(newProgress)
-            student.progressRecords.append(newProgress)
-        }
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("Failed to save progress: \(error)")
+        Task {
+            await store.setProgress(student: student, objectiveCode: objective.code, value: newPercentage)
         }
     }
 }

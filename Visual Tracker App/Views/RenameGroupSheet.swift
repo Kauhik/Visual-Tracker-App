@@ -1,9 +1,8 @@
 import SwiftUI
-import SwiftData
 
 struct RenameGroupSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
     let group: CohortGroup
 
@@ -48,14 +47,9 @@ struct RenameGroupSheet: View {
     private func save() {
         let value = trimmed
         guard value.isEmpty == false else { return }
-
-        group.name = value
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.renameGroup(group, newName: value)
             dismiss()
-        } catch {
-            print("Failed to rename group: \(error)")
         }
     }
 }

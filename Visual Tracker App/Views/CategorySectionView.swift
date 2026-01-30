@@ -1,12 +1,13 @@
 import SwiftUI
-import SwiftData
 
 struct CategorySectionView: View {
     let categoryObjective: LearningObjective
     let student: Student
     let allObjectives: [LearningObjective]
 
-    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
+    @EnvironmentObject private var store: CloudKitStore
+
+    private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     @State private var isExpanded: Bool = true
     @State private var editingTarget: CategoryEditTarget?

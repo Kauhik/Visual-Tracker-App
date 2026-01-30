@@ -1,0 +1,93 @@
+DEFINE SCHEMA
+
+RECORD TYPE Cohort (
+    cohortId STRING QUERYABLE,
+    name STRING,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE CohortGroup (
+    cohortRef REFERENCE QUERYABLE,
+    name STRING QUERYABLE,
+    colorHex STRING,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE Domain (
+    cohortRef REFERENCE QUERYABLE,
+    name STRING QUERYABLE,
+    colorHex STRING,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE CategoryLabel (
+    cohortRef REFERENCE QUERYABLE,
+    key STRING QUERYABLE,
+    code STRING,
+    title STRING,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE Student (
+    cohortRef REFERENCE QUERYABLE,
+    name STRING QUERYABLE,
+    group REFERENCE QUERYABLE,
+    domain REFERENCE QUERYABLE,
+    session STRING QUERYABLE,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE StudentCustomProperty (
+    cohortRef REFERENCE QUERYABLE,
+    student REFERENCE QUERYABLE,
+    key STRING QUERYABLE,
+    value STRING,
+    sortOrder INT64,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE ObjectiveProgress (
+    cohortRef REFERENCE QUERYABLE,
+    student REFERENCE QUERYABLE,
+    objectiveCode STRING QUERYABLE,
+    completionPercentage INT64,
+    status STRING,
+    notes STRING,
+    lastUpdated TIMESTAMP,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);
+
+RECORD TYPE LearningObjective (
+    cohortRef REFERENCE QUERYABLE,
+    code STRING QUERYABLE,
+    title STRING,
+    objectiveDescription STRING,
+    isQuantitative INT64,
+    parentCode STRING QUERYABLE,
+    sortOrder INT64,
+    createdAt TIMESTAMP,
+    updatedAt TIMESTAMP,
+    lastEditedByDisplayName STRING,
+    lastEditedByUserId STRING
+);

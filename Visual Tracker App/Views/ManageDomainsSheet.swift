@@ -1,13 +1,12 @@
 import SwiftUI
-import SwiftData
 
 struct ManageDomainsSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
-    @Query(sort: \Domain.name) private var domains: [Domain]
-    @Query(sort: \Student.createdAt) private var students: [Student]
-    @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
+    private var domains: [Domain] { store.domains }
+    private var students: [Student] { store.students }
+    private var allObjectives: [LearningObjective] { store.learningObjectives }
 
     @State private var newDomainName: String = ""
     @State private var newDomainColor: DomainColorPreset = .none
@@ -173,32 +172,25 @@ struct ManageDomainsSheet: View {
             return
         }
 
-        let domain = Domain(name: trimmed, colorHex: newDomainColor.hexValue)
-        modelContext.insert(domain)
-
-        do {
-            try modelContext.save()
-            newDomainName = ""
-            newDomainColor = .none
-        } catch {
-            errorMessage = "Failed to add domain: \(error)"
-            showingError = true
+        Task {
+            await store.addDomain(name: trimmed, colorHex: newDomainColor.hexValue)
+            if let error = store.lastErrorMessage {
+                errorMessage = error
+                showingError = true
+            } else {
+                newDomainName = ""
+                newDomainColor = .none
+            }
         }
     }
 
     private func deleteDomain(_ domain: Domain) {
-        let affected = students.filter { $0.domain?.id == domain.id }
-        for student in affected {
-            student.domain = nil
-        }
-
-        modelContext.delete(domain)
-
-        do {
-            try modelContext.save()
-        } catch {
-            errorMessage = "Failed to delete domain: \(error)"
-            showingError = true
+        Task {
+            await store.deleteDomain(domain)
+            if let error = store.lastErrorMessage {
+                errorMessage = error
+                showingError = true
+            }
         }
     }
 

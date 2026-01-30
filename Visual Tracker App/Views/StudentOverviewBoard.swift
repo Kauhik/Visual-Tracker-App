@@ -1,12 +1,7 @@
 import SwiftUI
-import SwiftData
 
 struct StudentOverviewBoard: View {
-    @Environment(\.modelContext) private var modelContext
-
-    @Query(sort: \Student.createdAt) private var students: [Student]
-    @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
-    @Query(sort: \CategoryLabel.key) private var categoryLabels: [CategoryLabel]
+    @EnvironmentObject private var store: CloudKitStore
 
     @Binding var selectedStudent: Student?
 
@@ -26,6 +21,10 @@ struct StudentOverviewBoard: View {
     @State private var renameErrorMessage: String = ""
 
     @State private var editingCategoryTarget: CategoryEditTarget?
+
+    private var students: [Student] { store.students }
+    private var allObjectives: [LearningObjective] { store.learningObjectives }
+    private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     private var rootCategories: [LearningObjective] {
         allObjectives
@@ -343,6 +342,9 @@ struct StudentOverviewBoard: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+        .task {
+            await store.loadProgressIfNeeded(for: student)
+        }
     }
 
     private var cohortOverviewRow: some View {
@@ -422,66 +424,39 @@ struct StudentOverviewBoard: View {
     private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-
-        let newStudent = Student(name: trimmed, group: group, session: session, domain: domain)
-        modelContext.insert(newStudent)
-
-        // Add custom properties
-        for (index, row) in customProperties.enumerated() {
-            let property = StudentCustomProperty(
-                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
-                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
-                sortOrder: index
-            )
-            property.student = newStudent
-            modelContext.insert(property)
-            newStudent.customProperties.append(property)
-        }
-
-        do {
-            try modelContext.save()
-            selectedStudent = newStudent
-        } catch {
-            print("Failed to add student: \(error)")
+        Task {
+            if let newStudent = await store.addStudent(
+                name: trimmed,
+                group: group,
+                session: session,
+                domain: domain,
+                customProperties: customProperties
+            ) {
+                selectedStudent = newStudent
+            }
         }
     }
 
     private func beginEdit(_ student: Student) {
-        studentToEdit = student
+        Task {
+            await store.loadCustomPropertiesIfNeeded(for: student)
+            studentToEdit = student
+        }
     }
 
     private func saveEditedStudent(_ student: Student, name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-
-        student.name = trimmed
-        student.group = group
-        student.session = session
-        student.domain = domain
-
-        // Remove existing custom properties
-        for existingProperty in student.customProperties {
-            modelContext.delete(existingProperty)
-        }
-        student.customProperties.removeAll()
-
-        // Add updated custom properties
-        for (index, row) in customProperties.enumerated() {
-            let property = StudentCustomProperty(
-                key: row.key.trimmingCharacters(in: .whitespacesAndNewlines),
-                value: row.value.trimmingCharacters(in: .whitespacesAndNewlines),
-                sortOrder: index
+        Task {
+            await store.updateStudent(
+                student,
+                name: trimmed,
+                group: group,
+                session: session,
+                domain: domain,
+                customProperties: customProperties
             )
-            property.student = student
-            modelContext.insert(property)
-            student.customProperties.append(property)
-        }
-
-        do {
-            try modelContext.save()
             studentToEdit = nil
-        } catch {
-            print("Failed to save edited student: \(error)")
         }
     }
 
@@ -489,16 +464,11 @@ struct StudentOverviewBoard: View {
         if selectedStudent?.id == student.id {
             selectedStudent = nil
         }
-
-        modelContext.delete(student)
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.deleteStudent(student)
             if selectedStudent == nil {
                 selectedStudent = students.first
             }
-        } catch {
-            print("Failed to delete student: \(error)")
         }
     }
 
@@ -533,17 +503,9 @@ struct StudentOverviewBoard: View {
             return
         }
 
-        student.name = trimmed
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.renameStudent(student, newName: trimmed)
             cancelRename()
-        } catch {
-            renameErrorMessage = "Failed to rename student: \(error)"
-            showingRenameError = true
-            DispatchQueue.main.async {
-                renameFocusedStudentId = student.id
-            }
         }
     }
 

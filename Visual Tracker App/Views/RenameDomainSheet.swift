@@ -1,9 +1,8 @@
 import SwiftUI
-import SwiftData
 
 struct RenameDomainSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
     let domain: Domain
 
@@ -55,27 +54,20 @@ struct RenameDomainSheet: View {
     private func save() {
         let value = trimmed
         guard value.isEmpty == false else { return }
+        let collision = store.domains.contains { other in
+            other.id != domain.id &&
+            other.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == value.lowercased()
+        }
 
-        do {
-            let descriptor = FetchDescriptor<Domain>()
-            let all = try modelContext.fetch(descriptor)
-
-            let collision = all.contains { other in
-                other.id != domain.id && other.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == value.lowercased()
-            }
-
-            if collision {
-                errorMessage = "A domain with that name already exists."
-                showingError = true
-                return
-            }
-
-            domain.name = value
-            try modelContext.save()
-            dismiss()
-        } catch {
-            errorMessage = "Failed to rename domain: \(error)"
+        if collision {
+            errorMessage = "A domain with that name already exists."
             showingError = true
+            return
+        }
+
+        Task {
+            await store.renameDomain(domain, newName: value)
+            dismiss()
         }
     }
 }

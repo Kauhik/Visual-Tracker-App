@@ -1,24 +1,11 @@
 import SwiftUI
-import SwiftData
-
-struct CustomPropertyRow: Identifiable {
-    let id: UUID
-    var key: String
-    var value: String
-
-    init(id: UUID = UUID(), key: String = "", value: String = "") {
-        self.id = id
-        self.key = key
-        self.value = value
-    }
-}
 
 struct AddStudentSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
-    @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
-    @Query(sort: \Domain.name) private var domains: [Domain]
+    private var groups: [CohortGroup] { store.groups }
+    private var domains: [Domain] { store.domains }
 
     @State private var name: String = ""
     @State private var selectedGroup: CohortGroup? = nil
@@ -175,8 +162,9 @@ struct AddStudentSheet: View {
         } message: {
             Text(validationErrorMessage)
         }
-        .onAppear {
+        .task {
             if let student = studentToEdit {
+                await store.loadCustomPropertiesIfNeeded(for: student)
                 name = student.name
                 selectedGroup = student.group
                 selectedSession = student.session

@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ObjectiveTreeView: View {
     let rootObjective: LearningObjective

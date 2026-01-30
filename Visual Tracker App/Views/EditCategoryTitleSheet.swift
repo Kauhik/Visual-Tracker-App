@@ -1,9 +1,8 @@
 import SwiftUI
-import SwiftData
 
 struct EditCategoryTitleSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
     let code: String
     let fallbackTitle: String
@@ -11,8 +10,6 @@ struct EditCategoryTitleSheet: View {
     @State private var titleText: String = ""
     @State private var showingError: Bool = false
     @State private var errorMessage: String = ""
-
-    @State private var loadedLabel: CategoryLabel?
 
     private var trimmedTitle: String {
         titleText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,29 +52,11 @@ struct EditCategoryTitleSheet: View {
             Text(errorMessage)
         }
         .onAppear {
-            loadOrCreateLabelIfNeeded()
-        }
-    }
-
-    private func loadOrCreateLabelIfNeeded() {
-        do {
-            let descriptor = FetchDescriptor<CategoryLabel>(
-                predicate: #Predicate { $0.key == code }
-            )
-            let existing = try modelContext.fetch(descriptor).first
-            if let existing {
-                loadedLabel = existing
-                titleText = existing.title
+            if let label = store.categoryLabels.first(where: { $0.key == code }) {
+                titleText = label.title
             } else {
-                let created = CategoryLabel(code: code, title: fallbackTitle)
-                modelContext.insert(created)
-                try modelContext.save()
-                loadedLabel = created
-                titleText = created.title
+                titleText = fallbackTitle
             }
-        } catch {
-            loadedLabel = nil
-            titleText = fallbackTitle
         }
     }
 
@@ -88,21 +67,9 @@ struct EditCategoryTitleSheet: View {
             showingError = true
             return
         }
-
-        if loadedLabel == nil {
-            let created = CategoryLabel(code: code, title: newValue)
-            modelContext.insert(created)
-            loadedLabel = created
-        } else {
-            loadedLabel?.title = newValue
-        }
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.updateCategoryLabel(code: code, title: newValue)
             dismiss()
-        } catch {
-            errorMessage = "Failed to save title: \(error)"
-            showingError = true
         }
     }
 }

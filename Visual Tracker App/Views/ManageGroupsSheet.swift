@@ -1,13 +1,12 @@
 import SwiftUI
-import SwiftData
 
 struct ManageGroupsSheet: View {
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: CloudKitStore
 
-    @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
-    @Query(sort: \Student.createdAt) private var students: [Student]
-    @Query(sort: \LearningObjective.sortOrder) private var allObjectives: [LearningObjective]
+    private var groups: [CohortGroup] { store.groups }
+    private var students: [Student] { store.students }
+    private var allObjectives: [LearningObjective] { store.learningObjectives }
 
     @State private var newGroupName: String = ""
     @State private var newGroupColor: GroupColorPreset = .none
@@ -155,31 +154,16 @@ struct ManageGroupsSheet: View {
     private func addGroup() {
         let trimmed = newGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-
-        let group = CohortGroup(name: trimmed, colorHex: newGroupColor.hexValue)
-        modelContext.insert(group)
-
-        do {
-            try modelContext.save()
+        Task {
+            await store.addGroup(name: trimmed, colorHex: newGroupColor.hexValue)
             newGroupName = ""
             newGroupColor = .none
-        } catch {
-            print("Failed to add group: \(error)")
         }
     }
 
     private func deleteGroup(_ group: CohortGroup) {
-        let affected = students.filter { $0.group?.id == group.id }
-        for student in affected {
-            student.group = nil
-        }
-
-        modelContext.delete(group)
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("Failed to delete group: \(error)")
+        Task {
+            await store.deleteGroup(group)
         }
     }
 }

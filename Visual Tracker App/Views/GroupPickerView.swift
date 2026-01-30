@@ -1,11 +1,12 @@
 import SwiftUI
-import SwiftData
 
 struct GroupPickerView: View {
     let title: String
     @Binding var selectedGroup: CohortGroup?
 
-    @Query(sort: \CohortGroup.name) private var groups: [CohortGroup]
+    @EnvironmentObject private var store: CloudKitStore
+
+    private var groups: [CohortGroup] { store.groups }
 
     var body: some View {
         Menu {
