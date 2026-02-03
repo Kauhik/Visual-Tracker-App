@@ -29,6 +29,22 @@ final class CloudKitStore: ObservableObject {
     private var progressRecordNameByID: [UUID: String] = [:]
     private var customPropertyRecordNameByID: [UUID: String] = [:]
 
+    private var syncCoordinator: CloudKitSyncCoordinator?
+    private var lastSyncDateDefaultsKey: String { "VisualTrackerApp.lastSyncDate.\(cohortId)" }
+
+    private var lastSyncDate: Date {
+        get {
+            let value = UserDefaults.standard.double(forKey: lastSyncDateDefaultsKey)
+            return value > 0 ? Date(timeIntervalSince1970: value) : .distantPast
+        }
+        set {
+            UserDefaults.standard.set(newValue.timeIntervalSince1970, forKey: lastSyncDateDefaultsKey)
+        }
+    }
+
+    // Exposed to the sync coordinator (read-only)
+    var currentCohortRecordID: CKRecord.ID? { cohortRecordID }
+
     init(service: CloudKitService = CloudKitService(), usePreviewData: Bool = false) {
         self.service = service
 
@@ -120,7 +136,12 @@ final class CloudKitStore: ObservableObject {
 
             progressLoadedStudentIDs.removeAll()
             customPropertiesLoadedStudentIDs.removeAll()
+
+            // Full reload is authoritative; move the incremental sync cursor forward.
+            lastSyncDate = Date()
             hasLoaded = true
+
+            startLiveSyncIfNeeded()
         } catch {
             let detail = service.describe(error)
             lastErrorMessage = friendlyMessage(for: error, detail: detail)
@@ -153,9 +174,9 @@ final class CloudKitStore: ObservableObject {
         do {
             let saved = try await service.save(record: record)
             groupRecordNameByID[group.id] = saved.recordID.recordName
+            syncCoordinator?.noteLocalWrite()
         } catch {
-            groups.removeAll { $0.id == group.id }
-            lastErrorMessage = "Failed to add group: \(error.localizedDescription)"
+            lastErrorMessage = "Failed to save group: \(error.localizedDescription)"
         }
     }
 
@@ -189,6 +210,7 @@ final class CloudKitStore: ObservableObject {
             for student in affected {
                 try await saveStudentRecord(student)
             }
+            syncCoordinator?.noteLocalWrite()
         } catch {
             lastErrorMessage = "Failed to delete group: \(error.localizedDescription)"
             await reloadAllData()
@@ -364,6 +386,7 @@ final class CloudKitStore: ObservableObject {
             try await service.delete(recordID: recordID)
             try await deleteProgress(for: student)
             try await deleteCustomProperties(for: student)
+            syncCoordinator?.noteLocalWrite()
         } catch {
             lastErrorMessage = "Failed to delete student: \(error.localizedDescription)"
             await reloadAllData()
@@ -498,6 +521,7 @@ final class CloudKitStore: ObservableObject {
             try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
 
             await reloadAllData()
+            syncCoordinator?.noteLocalWrite()
         } catch {
             lastErrorMessage = "Failed to reset data: \(error.localizedDescription)"
         }
@@ -535,6 +559,7 @@ final class CloudKitStore: ObservableObject {
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         groupRecordNameByID[group.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
     }
 
     private func saveDomainRecord(_ domain: Domain) async throws {
@@ -547,6 +572,7 @@ final class CloudKitStore: ObservableObject {
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         domainRecordNameByID[domain.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
     }
 
     private func saveStudentRecord(_ student: Student) async throws {
@@ -556,6 +582,7 @@ final class CloudKitStore: ObservableObject {
         applyStudentFields(student, to: record, cohortRecordID: cohortRecordID)
         let saved = try await service.save(record: record)
         studentRecordNameByID[student.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
     }
 
     private func applyStudentFields(_ student: Student, to record: CKRecord, cohortRecordID: CKRecord.ID) {
@@ -616,6 +643,7 @@ final class CloudKitStore: ObservableObject {
 
         let saved = try await service.save(record: record)
         customPropertyRecordNameByID[property.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
     }
 
     private func deleteCustomProperties(for student: Student) async throws {
@@ -832,6 +860,479 @@ final class CloudKitStore: ObservableObject {
             map[recordName] = item
         }
         return map
+    }
+
+    // MARK: - Live CloudKit Updates
+
+    private func startLiveSyncIfNeeded() {
+        guard syncCoordinator == nil else { return }
+        // Preview mode does not initialize cohortRecordID; only start after a real load.
+        guard hasLoaded else { return }
+        syncCoordinator = CloudKitSyncCoordinator(store: self, service: service)
+        syncCoordinator?.start()
+    }
+
+    func performIncrementalSync() async {
+        guard hasLoaded else { return }
+        guard let cohortRecordID else { return }
+
+        // Move cursor to the start of this sync window to avoid missing writes that happen mid-sync.
+        let syncWindowStart = Date()
+        let previousSync = lastSyncDate
+
+        let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let updatedAfter = previousSync as NSDate
+
+        do {
+            // Keep group/domain instances stable by upserting in-place.
+            let groupPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+            let domainPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+            let labelPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+            let studentPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+            let progressPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+            let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND modificationDate > %@", cohortRef, updatedAfter)
+
+            async let groupsChanged = service.queryRecords(
+                ofType: RecordType.cohortGroup,
+                predicate: groupPredicate
+            )
+            async let domainsChanged = service.queryRecords(
+                ofType: RecordType.domain,
+                predicate: domainPredicate
+            )
+            async let labelsChanged = service.queryRecords(
+                ofType: RecordType.categoryLabel,
+                predicate: labelPredicate
+            )
+            async let studentsChanged = service.queryRecords(
+                ofType: RecordType.student,
+                predicate: studentPredicate
+            )
+            async let progressChanged = service.queryRecords(
+                ofType: RecordType.objectiveProgress,
+                predicate: progressPredicate
+            )
+            async let customPropsChanged = service.queryRecords(
+                ofType: RecordType.studentCustomProperty,
+                predicate: customPropPredicate
+            )
+
+            let (groupRecords, domainRecords, labelRecords, studentRecords, progressRecords, customPropRecords) =
+            try await (groupsChanged, domainsChanged, labelsChanged, studentsChanged, progressChanged, customPropsChanged)
+
+            if groupRecords.isEmpty &&
+                domainRecords.isEmpty &&
+                labelRecords.isEmpty &&
+                studentRecords.isEmpty &&
+                progressRecords.isEmpty &&
+                customPropRecords.isEmpty {
+                lastSyncDate = syncWindowStart
+                return
+            }
+
+            // Upsert order matters: groups/domains first, then students, then child records.
+            applyGroupChanges(groupRecords)
+            applyDomainChanges(domainRecords)
+            applyCategoryLabelChanges(labelRecords)
+            applyStudentChanges(studentRecords)
+            applyProgressChanges(progressRecords)
+            applyCustomPropertyChanges(customPropRecords)
+
+            // Advance cursor
+            lastSyncDate = syncWindowStart
+        } catch {
+            // Keep it quiet; polling / next activation will retry.
+            // Don't overwrite existing user-facing error unless something else does.
+        }
+    }
+
+    func fetchAndApplyRemoteRecord(recordType: String, recordID: CKRecord.ID) async {
+        do {
+            let record = try await service.fetchRecord(with: recordID)
+            applyRemoteUpsert(recordType: recordType, record: record)
+        } catch {
+            // If the record can't be fetched (e.g., deleted quickly), allow reconcile/poll to handle eventual consistency.
+        }
+    }
+
+    func applyRemoteDeletion(recordType: String, recordID: CKRecord.ID) {
+        switch recordType {
+        case RecordType.cohortGroup:
+            deleteGroupByRecordID(recordID)
+        case RecordType.domain:
+            deleteDomainByRecordID(recordID)
+        case RecordType.student:
+            deleteStudentByRecordID(recordID)
+        case RecordType.categoryLabel:
+            deleteCategoryLabelByRecordID(recordID)
+        case RecordType.objectiveProgress:
+            deleteProgressByRecordID(recordID)
+        case RecordType.studentCustomProperty:
+            deleteCustomPropertyByRecordID(recordID)
+        default:
+            break
+        }
+    }
+
+    func reconcileDeletionsFromServer() async {
+        guard hasLoaded else { return }
+        guard let cohortRecordID else { return }
+
+        let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
+
+        do {
+            async let groupIDs = service.queryRecordIDs(ofType: RecordType.cohortGroup, predicate: predicate)
+            async let domainIDs = service.queryRecordIDs(ofType: RecordType.domain, predicate: predicate)
+            async let studentIDs = service.queryRecordIDs(ofType: RecordType.student, predicate: predicate)
+            async let labelIDs = service.queryRecordIDs(ofType: RecordType.categoryLabel, predicate: predicate)
+            async let progressIDs = service.queryRecordIDs(ofType: RecordType.objectiveProgress, predicate: predicate)
+            async let customPropIDs = service.queryRecordIDs(ofType: RecordType.studentCustomProperty, predicate: predicate)
+
+            let (remoteGroupIDs, remoteDomainIDs, remoteStudentIDs, remoteLabelIDs, remoteProgressIDs, remoteCustomPropIDs) =
+            try await (groupIDs, domainIDs, studentIDs, labelIDs, progressIDs, customPropIDs)
+
+            reconcileGroups(remote: Set(remoteGroupIDs.map(\.recordName)))
+            reconcileDomains(remote: Set(remoteDomainIDs.map(\.recordName)))
+            reconcileStudents(remote: Set(remoteStudentIDs.map(\.recordName)))
+            reconcileLabels(remote: Set(remoteLabelIDs.map(\.recordName)))
+            reconcileProgress(remote: Set(remoteProgressIDs.map(\.recordName)))
+            reconcileCustomProperties(remote: Set(remoteCustomPropIDs.map(\.recordName)))
+        } catch {
+            // Ignore; will retry later.
+        }
+    }
+
+    private func applyRemoteUpsert(recordType: String, record: CKRecord) {
+        switch recordType {
+        case RecordType.cohortGroup:
+            applyGroupChanges([record])
+        case RecordType.domain:
+            applyDomainChanges([record])
+        case RecordType.categoryLabel:
+            applyCategoryLabelChanges([record])
+        case RecordType.student:
+            applyStudentChanges([record])
+        case RecordType.objectiveProgress:
+            applyProgressChanges([record])
+        case RecordType.studentCustomProperty:
+            applyCustomPropertyChanges([record])
+        default:
+            break
+        }
+    }
+
+    private func applyGroupChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        for record in records {
+            let name = record[Field.name] as? String ?? "Untitled"
+            let colorHex = record[Field.colorHex] as? String
+            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+
+            if let existing = groups.first(where: { $0.id == uuid }) {
+                existing.name = name
+                existing.colorHex = colorHex
+            } else {
+                let g = CohortGroup(name: name, colorHex: colorHex)
+                g.id = uuid
+                groups.append(g)
+            }
+
+            groupRecordNameByID[uuid] = record.recordID.recordName
+        }
+
+        groups.sort { $0.name < $1.name }
+    }
+
+    private func applyDomainChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        for record in records {
+            let name = record[Field.name] as? String ?? "Untitled"
+            let colorHex = record[Field.colorHex] as? String
+            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+
+            if let existing = domains.first(where: { $0.id == uuid }) {
+                existing.name = name
+                existing.colorHex = colorHex
+            } else {
+                let d = Domain(name: name, colorHex: colorHex)
+                d.id = uuid
+                domains.append(d)
+            }
+
+            domainRecordNameByID[uuid] = record.recordID.recordName
+        }
+
+        domains.sort { $0.name < $1.name }
+    }
+
+    private func applyCategoryLabelChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        for record in records {
+            let code = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
+            let title = record[Field.title] as? String ?? code
+
+            if let existing = categoryLabels.first(where: { $0.key == code }) {
+                existing.title = title
+            } else {
+                categoryLabels.append(CategoryLabel(code: code, title: title))
+            }
+        }
+
+        categoryLabels.sort { $0.key < $1.key }
+    }
+
+    private func applyStudentChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        let groupByRecordName: [String: CohortGroup] = {
+            var map: [String: CohortGroup] = [:]
+            for group in groups {
+                let rn = groupRecordNameByID[group.id] ?? group.id.uuidString
+                map[rn] = group
+            }
+            return map
+        }()
+
+        let domainByRecordName: [String: Domain] = {
+            var map: [String: Domain] = [:]
+            for domain in domains {
+                let rn = domainRecordNameByID[domain.id] ?? domain.id.uuidString
+                map[rn] = domain
+            }
+            return map
+        }()
+
+        for record in records {
+            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+
+            let name = record[Field.name] as? String ?? "Unnamed"
+            let sessionRaw = record[Field.session] as? String ?? Session.morning.rawValue
+            let session = Session(rawValue: sessionRaw) ?? .morning
+
+            let group = (record[Field.group] as? CKRecord.Reference).flatMap { groupByRecordName[$0.recordID.recordName] }
+            let domain = (record[Field.domain] as? CKRecord.Reference).flatMap { domainByRecordName[$0.recordID.recordName] }
+
+            let createdAt = (record[Field.createdAt] as? Date) ?? Date()
+
+            if let existing = students.first(where: { $0.id == uuid }) {
+                existing.name = name
+                existing.session = session
+                existing.group = group
+                existing.domain = domain
+                existing.createdAt = createdAt
+            } else {
+                let s = Student(name: name, group: group, session: session, domain: domain)
+                s.id = uuid
+                s.createdAt = createdAt
+                students.append(s)
+            }
+
+            studentRecordNameByID[uuid] = record.recordID.recordName
+        }
+
+        students.sort { $0.createdAt < $1.createdAt }
+    }
+
+    private func applyProgressChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        let studentIDByRecordName: [String: UUID] = {
+            var map: [String: UUID] = [:]
+            for (id, recordName) in studentRecordNameByID {
+                map[recordName] = id
+            }
+            return map
+        }()
+
+        for record in records {
+            guard let studentRef = record[Field.student] as? CKRecord.Reference else { continue }
+            guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
+            guard let student = students.first(where: { $0.id == studentID }) else { continue }
+
+            // Only mutate loaded progress arrays to avoid unexpected heavy loads.
+            guard progressLoadedStudentIDs.contains(student.id) else {
+                continue
+            }
+
+            let objectiveCode = record[Field.objectiveCode] as? String ?? ""
+            let percentage = (record[Field.completionPercentage] as? Int)
+                ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
+                ?? 0
+            let notes = record[Field.notes] as? String ?? ""
+            let lastUpdated = (record[Field.lastUpdated] as? Date) ?? Date()
+            let statusRaw = record[Field.status] as? String
+            let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: percentage)
+
+            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+
+            if let existing = student.progressRecords.first(where: { $0.id == uuid }) {
+                existing.objectiveCode = objectiveCode
+                existing.notes = notes
+                existing.lastUpdated = lastUpdated
+                existing.status = status
+                existing.updateCompletion(percentage)
+            } else {
+                let p = ObjectiveProgress(objectiveCode: objectiveCode, completionPercentage: percentage, notes: notes)
+                p.id = uuid
+                p.student = student
+                p.notes = notes
+                p.lastUpdated = lastUpdated
+                p.status = status
+                student.progressRecords.append(p)
+            }
+
+            progressRecordNameByID[uuid] = record.recordID.recordName
+            student.progressRecords.sort { $0.objectiveCode < $1.objectiveCode }
+        }
+    }
+
+    private func applyCustomPropertyChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+
+        let studentIDByRecordName: [String: UUID] = {
+            var map: [String: UUID] = [:]
+            for (id, recordName) in studentRecordNameByID {
+                map[recordName] = id
+            }
+            return map
+        }()
+
+        for record in records {
+            guard let studentRef = record[Field.student] as? CKRecord.Reference else { continue }
+            guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
+            guard let student = students.first(where: { $0.id == studentID }) else { continue }
+
+            guard customPropertiesLoadedStudentIDs.contains(student.id) else {
+                continue
+            }
+
+            let key = record[Field.key] as? String ?? ""
+            let value = record[Field.value] as? String ?? ""
+            let sortOrder = (record[Field.sortOrder] as? Int)
+                ?? (record[Field.sortOrder] as? NSNumber)?.intValue
+                ?? 0
+
+            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+
+            if let existing = student.customProperties.first(where: { $0.id == uuid }) {
+                existing.key = key
+                existing.value = value
+                existing.sortOrder = sortOrder
+            } else {
+                let prop = StudentCustomProperty(key: key, value: value, sortOrder: sortOrder)
+                prop.id = uuid
+                prop.student = student
+                student.customProperties.append(prop)
+            }
+
+            customPropertyRecordNameByID[uuid] = record.recordID.recordName
+            student.customProperties.sort { $0.sortOrder < $1.sortOrder }
+        }
+    }
+
+    private func deleteGroupByRecordID(_ recordID: CKRecord.ID) {
+        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        groups.removeAll { $0.id == uuid }
+        groupRecordNameByID.removeValue(forKey: uuid)
+
+        for student in students where student.group?.id == uuid {
+            student.group = nil
+        }
+    }
+
+    private func deleteDomainByRecordID(_ recordID: CKRecord.ID) {
+        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        domains.removeAll { $0.id == uuid }
+        domainRecordNameByID.removeValue(forKey: uuid)
+
+        for student in students where student.domain?.id == uuid {
+            student.domain = nil
+        }
+    }
+
+    private func deleteStudentByRecordID(_ recordID: CKRecord.ID) {
+        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        students.removeAll { $0.id == uuid }
+        studentRecordNameByID.removeValue(forKey: uuid)
+        progressLoadedStudentIDs.remove(uuid)
+        customPropertiesLoadedStudentIDs.remove(uuid)
+    }
+
+    private func deleteCategoryLabelByRecordID(_ recordID: CKRecord.ID) {
+        let key = recordID.recordName
+        categoryLabels.removeAll { $0.key == key || $0.code == key }
+    }
+
+    private func deleteProgressByRecordID(_ recordID: CKRecord.ID) {
+        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        progressRecordNameByID.removeValue(forKey: uuid)
+        for student in students {
+            if progressLoadedStudentIDs.contains(student.id) {
+                student.progressRecords.removeAll { $0.id == uuid }
+            }
+        }
+    }
+
+    private func deleteCustomPropertyByRecordID(_ recordID: CKRecord.ID) {
+        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        customPropertyRecordNameByID.removeValue(forKey: uuid)
+        for student in students {
+            if customPropertiesLoadedStudentIDs.contains(student.id) {
+                student.customProperties.removeAll { $0.id == uuid }
+            }
+        }
+    }
+
+    private func reconcileGroups(remote: Set<String>) {
+        let local = Set(groupRecordNameByID.values)
+        let missing = local.subtracting(remote)
+        for recordName in missing {
+            deleteGroupByRecordID(CKRecord.ID(recordName: recordName))
+        }
+    }
+
+    private func reconcileDomains(remote: Set<String>) {
+        let local = Set(domainRecordNameByID.values)
+        let missing = local.subtracting(remote)
+        for recordName in missing {
+            deleteDomainByRecordID(CKRecord.ID(recordName: recordName))
+        }
+    }
+
+    private func reconcileStudents(remote: Set<String>) {
+        let local = Set(studentRecordNameByID.values)
+        let missing = local.subtracting(remote)
+        for recordName in missing {
+            deleteStudentByRecordID(CKRecord.ID(recordName: recordName))
+        }
+    }
+
+    private func reconcileLabels(remote: Set<String>) {
+        let local = Set(categoryLabels.map { $0.key })
+        let missing = local.subtracting(remote)
+        for key in missing {
+            deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
+        }
+    }
+
+    private func reconcileProgress(remote: Set<String>) {
+        let local = Set(progressRecordNameByID.values)
+        let missing = local.subtracting(remote)
+        for recordName in missing {
+            deleteProgressByRecordID(CKRecord.ID(recordName: recordName))
+        }
+    }
+
+    private func reconcileCustomProperties(remote: Set<String>) {
+        let local = Set(customPropertyRecordNameByID.values)
+        let missing = local.subtracting(remote)
+        for recordName in missing {
+            deleteCustomPropertyByRecordID(CKRecord.ID(recordName: recordName))
+        }
     }
 
     private enum RecordType {

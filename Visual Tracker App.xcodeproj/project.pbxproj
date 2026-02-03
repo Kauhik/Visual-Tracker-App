@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		80BC947C2F308F6A00667F8B /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 80BC947B2F308F6A00667F8B /* CloudKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		809B2D352F285986007F9E7B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		809B2D252F285985007F9E7B /* Visual Tracker App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Visual Tracker App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		809B2D342F285986007F9E7B /* Visual Tracker AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Visual Tracker AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		809B2D3E2F285986007F9E7B /* Visual Tracker AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Visual Tracker AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		80BC947B2F308F6A00667F8B /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				80BC947C2F308F6A00667F8B /* CloudKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +84,7 @@
 				809B2D272F285985007F9E7B /* Visual Tracker App */,
 				809B2D372F285986007F9E7B /* Visual Tracker AppTests */,
 				809B2D412F285986007F9E7B /* Visual Tracker AppUITests */,
+				80BC947A2F308F6A00667F8B /* Frameworks */,
 				809B2D262F285985007F9E7B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +97,14 @@
 				809B2D3E2F285986007F9E7B /* Visual Tracker AppUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		80BC947A2F308F6A00667F8B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				80BC947B2F308F6A00667F8B /* CloudKit.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -405,6 +420,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -439,6 +455,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
