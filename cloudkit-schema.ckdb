@@ -4,7 +4,7 @@ RECORD TYPE Cohort (
     cohortId STRING QUERYABLE,
     name STRING,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -14,7 +14,7 @@ RECORD TYPE CohortGroup (
     name STRING QUERYABLE,
     colorHex STRING,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -24,7 +24,7 @@ RECORD TYPE Domain (
     name STRING QUERYABLE,
     colorHex STRING,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -35,7 +35,7 @@ RECORD TYPE CategoryLabel (
     code STRING,
     title STRING,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -47,7 +47,7 @@ RECORD TYPE Student (
     domain REFERENCE QUERYABLE,
     session STRING QUERYABLE,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -59,7 +59,7 @@ RECORD TYPE StudentCustomProperty (
     value STRING,
     sortOrder INT64,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -73,7 +73,7 @@ RECORD TYPE ObjectiveProgress (
     notes STRING,
     lastUpdated TIMESTAMP,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );
@@ -87,7 +87,7 @@ RECORD TYPE LearningObjective (
     parentCode STRING QUERYABLE,
     sortOrder INT64,
     createdAt TIMESTAMP,
-    updatedAt TIMESTAMP,
+    updatedAt TIMESTAMP QUERYABLE,
     lastEditedByDisplayName STRING,
     lastEditedByUserId STRING
 );

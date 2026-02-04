@@ -72,7 +72,8 @@ final class CloudKitService {
     func queryRecords(
         ofType recordType: String,
         predicate: NSPredicate,
-        sortDescriptors: [NSSortDescriptor] = []
+        sortDescriptors: [NSSortDescriptor] = [],
+        desiredKeys: [String]? = nil
     ) async throws -> [CKRecord] {
         var records: [CKRecord] = []
         var cursor: CKQueryOperation.Cursor?
@@ -88,6 +89,8 @@ final class CloudKitService {
             }
 
             operation.resultsLimit = CKQueryOperation.maximumResults
+            operation.desiredKeys = desiredKeys
+
             operation.recordFetchedBlock = { record in
                 records.append(record)
             }
@@ -108,6 +111,38 @@ final class CloudKitService {
         } while cursor != nil
 
         return records
+    }
+
+    func queryRecordIDs(
+        ofType recordType: String,
+        predicate: NSPredicate,
+        sortDescriptors: [NSSortDescriptor] = []
+    ) async throws -> [CKRecord.ID] {
+        let records = try await queryRecords(
+            ofType: recordType,
+            predicate: predicate,
+            sortDescriptors: sortDescriptors,
+            desiredKeys: []
+        )
+        return records.map { $0.recordID }
+    }
+
+    func saveSubscription(_ subscription: CKSubscription) async throws -> CKSubscription {
+        try await withCheckedThrowingContinuation { continuation in
+            database.save(subscription) { saved, error in
+                if let error {
+                    self.logger.error("saveSubscription failed: \(self.describe(error), privacy: .public)")
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let saved {
+                    continuation.resume(returning: saved)
+                } else {
+                    self.logger.error("saveSubscription failed: missing saved subscription")
+                    continuation.resume(throwing: CKError(.unknownItem))
+                }
+            }
+        }
     }
 
     private func saveRecord(_ record: CKRecord) async throws -> CKRecord {
