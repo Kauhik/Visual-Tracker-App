@@ -57,9 +57,35 @@ struct ContentView: View {
         }
         .task {
             await store.loadIfNeeded()
+            await store.ensurePresetDomains()
         }
         .overlay {
-            if store.isLoading {
+            if let resetProgress = store.resetProgress {
+                ZStack {
+                    Color.black.opacity(0.12).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView(
+                            value: Double(resetProgress.step),
+                            total: Double(max(resetProgress.totalSteps, 1))
+                        )
+                        .progressViewStyle(.linear)
+                        Text("Resetting...")
+                            .font(.headline)
+                        Text(resetProgress.message)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                }
+            } else if store.isLoading {
                 ZStack {
                     Color.black.opacity(0.12).ignoresSafeArea()
                     ProgressView("Loading Cloud Data…")

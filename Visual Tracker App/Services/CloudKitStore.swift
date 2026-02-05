@@ -4,11 +4,18 @@ import Combine
 import Foundation
 import os.log
 
+struct ResetProgress: Equatable {
+    let message: String
+    let step: Int
+    let totalSteps: Int
+}
+
 @MainActor
 final class CloudKitStore: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var lastErrorMessage: String?
     @Published var requiresICloudLogin: Bool = false
+    @Published var resetProgress: ResetProgress?
 
     @Published var students: [Student] = []
     @Published var groups: [CohortGroup] = []
@@ -245,6 +252,21 @@ final class CloudKitStore: ObservableObject {
         } catch {
             domains.removeAll { $0.id == domain.id }
             lastErrorMessage = "Failed to add domain: \(error.localizedDescription)"
+        }
+    }
+
+    func ensurePresetDomains() async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+
+        let presets = ["Tech", "Design", "Domain Expert"]
+        var existing = Set(domains.map { normalizedDomainName($0.name) })
+
+        for preset in presets {
+            let normalized = normalizedDomainName(preset)
+            guard existing.contains(normalized) == false else { continue }
+            await addDomain(name: preset, colorHex: nil)
+            existing.insert(normalized)
         }
     }
 
@@ -507,6 +529,11 @@ final class CloudKitStore: ObservableObject {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         isLoading = true
+        resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 6)
+        defer {
+            isLoading = false
+            resetProgress = nil
+        }
 
         do {
             guard let cohortRecordID else {
@@ -514,20 +541,26 @@ final class CloudKitStore: ObservableObject {
                 return
             }
 
+            resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 4, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 5, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting domains...", step: 6, totalSteps: 6)
             try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
 
+            resetProgress = ResetProgress(message: "Reloading data...", step: 6, totalSteps: 6)
             await reloadAllData()
+            await ensurePresetDomains()
             syncCoordinator?.noteLocalWrite()
         } catch {
             lastErrorMessage = "Failed to reset data: \(error.localizedDescription)"
         }
-
-        isLoading = false
     }
 
     private func ensureCohortRecord() async throws -> CKRecord {
@@ -849,6 +882,10 @@ final class CloudKitStore: ObservableObject {
     private func recordID<T>(for item: T, lookup: [UUID: String]) -> CKRecord.ID where T: Identifiable, T.ID == UUID {
         let recordName = lookup[item.id] ?? item.id.uuidString
         return CKRecord.ID(recordName: recordName)
+    }
+
+    private func normalizedDomainName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func dictionaryByRecordName<T>(

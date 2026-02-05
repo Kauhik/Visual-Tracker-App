@@ -5,12 +5,14 @@ struct StudentOverviewBoard: View {
 
     @Binding var selectedStudent: Student?
 
-    @State private var showingAddSheet: Bool = false
+    @State private var showingManageStudents: Bool = false
     @State private var studentToEdit: Student?
     @State private var showingManageGroups: Bool = false
     @State private var showingManageDomains: Bool = false
     @State private var studentPendingDelete: Student?
     @State private var searchText: String = ""
+    @State private var debouncedSearchText: String = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     @State private var editingStudentId: UUID?
     @State private var editingStudentName: String = ""
@@ -37,7 +39,7 @@ struct StudentOverviewBoard: View {
     }
 
     private var trimmedSearchText: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        debouncedSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var filteredStudents: [Student] {
@@ -125,7 +127,7 @@ struct StudentOverviewBoard: View {
                 }
 
                 Section {
-                    ForEach(filteredStudents) { student in
+                    ForEach(filteredStudents, id: \.id) { student in
                         studentRow(student)
                             .tag(student as Student?)
                             .contextMenu {
@@ -152,8 +154,8 @@ struct StudentOverviewBoard: View {
             }
             .listStyle(.sidebar)
         }
-        .sheet(isPresented: $showingAddSheet) {
-            AddStudentSheet { name, group, session, domain, customProperties in
+        .sheet(isPresented: $showingManageStudents) {
+            ManageStudentsSheet { name, group, session, domain, customProperties in
                 addStudent(named: name, group: group, session: session, domain: domain, customProperties: customProperties)
             }
         }
@@ -205,6 +207,19 @@ struct StudentOverviewBoard: View {
             if selectedStudent == nil {
                 selectedStudent = students.first
             }
+            if debouncedSearchText != searchText {
+                debouncedSearchText = searchText
+            }
+        }
+        .onChange(of: searchText) { _, newValue in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    debouncedSearchText = newValue
+                }
+            }
         }
     }
 
@@ -223,9 +238,9 @@ struct StudentOverviewBoard: View {
             Spacer()
 
             Button {
-                showingAddSheet = true
+                showingManageStudents = true
             } label: {
-                Label("Add Student", systemImage: "plus")
+                Label("Manage Students", systemImage: "person.2.badge.gearshape")
             }
             .buttonStyle(.borderedProminent)
         }
@@ -253,7 +268,6 @@ struct StudentOverviewBoard: View {
     }
 
     private func studentRow(_ student: Student) -> some View {
-        let overall = ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
         let isEditing = editingStudentId == student.id
 
         return HStack(spacing: 10) {
@@ -315,14 +329,6 @@ struct StudentOverviewBoard: View {
                         .font(.caption2)
                         .foregroundColor(.secondary.opacity(0.6))
 
-                    Text(student.session.rawValue)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-
-                    Text("•")
-                        .font(.caption2)
-                        .foregroundColor(.secondary.opacity(0.6))
-
                     Text(student.domain?.name ?? "No Domain")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -330,21 +336,9 @@ struct StudentOverviewBoard: View {
             }
 
             Spacer()
-
-            HStack(spacing: 8) {
-                CircularProgressView(progress: Double(overall) / 100.0)
-                    .frame(width: 18, height: 18)
-
-                Text("\(overall)%")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .task {
-            await store.loadProgressIfNeeded(for: student)
-        }
     }
 
     private var cohortOverviewRow: some View {
