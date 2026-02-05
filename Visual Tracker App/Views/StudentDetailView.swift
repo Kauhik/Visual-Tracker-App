@@ -9,7 +9,7 @@ struct StudentDetailView: View {
     @State private var showingAddSheet: Bool = false
     @State private var studentPendingDelete: Student?
 
-    @State private var selectedGroupFilter: GroupFilter = .all
+    @State private var selectedScope: StudentFilterScope = .overall
     @State private var isSwitchingScope: Bool = false
 
     @State private var editingCategoryTarget: CategoryEditTarget?
@@ -17,6 +17,7 @@ struct StudentDetailView: View {
     private var students: [Student] { store.students }
     private var allObjectives: [LearningObjective] { store.learningObjectives }
     private var groups: [CohortGroup] { store.groups }
+    private var domains: [Domain] { store.domains }
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     private var rootCategories: [LearningObjective] {
@@ -29,14 +30,22 @@ struct StudentDetailView: View {
         students.filter { $0.group == nil }
     }
 
+    private var noDomainStudents: [Student] {
+        students.filter { $0.domain == nil }
+    }
+
     private var filteredStudents: [Student] {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return students
         case .ungrouped:
             return ungroupedStudents
         case .group(let id):
             return students.filter { $0.group?.id == id }
+        case .domain(let id):
+            return students.filter { $0.domain?.id == id }
+        case .noDomain:
+            return noDomainStudents
         }
     }
 
@@ -49,42 +58,46 @@ struct StudentDetailView: View {
     }
 
     private var scopeTitle: String {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return "Overall"
         case .ungrouped:
             return "Ungrouped"
         case .group(let id):
             return groups.first(where: { $0.id == id })?.name ?? (selectedGroup?.name ?? "Group")
+        case .domain(let id):
+            return domains.first(where: { $0.id == id })?.name ?? "Domain"
+        case .noDomain:
+            return "No Domain"
         }
     }
 
     private var scopeSubtitle: String {
         let count = eligibleStudentCount
-        switch selectedGroupFilter {
-        case .all:
-            return "\(count) student\(count == 1 ? "" : "s")"
-        case .ungrouped:
-            return "\(count) student\(count == 1 ? "" : "s")"
-        case .group:
+        switch selectedScope {
+        case .overall, .ungrouped, .group, .domain, .noDomain:
             return "\(count) student\(count == 1 ? "" : "s")"
         }
     }
 
     private var scopeIconSystemName: String {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return "chart.bar.fill"
         case .ungrouped:
             return "tray.fill"
         case .group:
             return "folder.fill"
+        case .domain:
+            return "tag.fill"
+        case .noDomain:
+            return "tag.slash"
         }
     }
 
     private var scopeOverallProgress: Int {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
         case .ungrouped:
             return ProgressCalculator.cohortOverall(students: ungroupedStudents, allObjectives: allObjectives)
@@ -95,7 +108,9 @@ struct StudentDetailView: View {
             if let group = selectedGroup {
                 return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
             }
-            return 0
+            return ProgressCalculator.cohortOverall(students: filteredStudents, allObjectives: allObjectives)
+        case .domain, .noDomain:
+            return ProgressCalculator.cohortOverall(students: filteredStudents, allObjectives: allObjectives)
         }
     }
 
@@ -358,24 +373,32 @@ struct StudentDetailView: View {
     }
 
     private var emptyScopeTitle: String {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return "No Students Yet"
         case .ungrouped:
             return "No Students in Ungrouped"
         case .group:
             return "No Students in Group"
+        case .domain:
+            return "No Students in Domain"
+        case .noDomain:
+            return "No Students with No Domain"
         }
     }
 
     private var emptyScopeDescription: String {
-        switch selectedGroupFilter {
-        case .all:
+        switch selectedScope {
+        case .overall:
             return "Add a student to see overall progress."
         case .ungrouped:
             return "No students in this scope. Add a student or move students to Ungrouped."
         case .group:
             return "No students in this scope. Add a student or move students into this group."
+        case .domain:
+            return "No students in this scope. Add a student or assign students to this domain."
+        case .noDomain:
+            return "No students in this scope. Add a student or remove their domain assignment."
         }
     }
 
@@ -484,33 +507,66 @@ struct StudentDetailView: View {
 
     private var studentBoardFilterMenu: some View {
         filterMenuView(style: .standard)
-            .help("Filter student cards by group (also sets the scope shown in header and A–E breakdown)")
+            .help("Filter student cards by group or domain (also sets the scope shown in header and A–E breakdown)")
     }
 
     private var overviewFilterMenu: some View {
         filterMenuView(style: .compact)
-            .help("Change the scope shown in the overview container")
+            .help("Change the scope shown in the overview container (group or domain)")
     }
 
     private func filterMenuView(style: FilterMenuStyle) -> some View {
         Menu {
             Button("Overall") {
-                beginScopeSwitch(to: .all, group: nil)
+                beginScopeSwitch(to: .overall)
             }
 
             Divider()
 
-            if groups.isEmpty == false {
-                ForEach(groups) { group in
-                    Button(group.name) {
-                        beginScopeSwitch(to: .group(group.id), group: group)
+            Menu("Groups") {
+                Button("All Groups…") {
+                    beginScopeSwitch(to: .overall)
+                }
+
+                Divider()
+
+                Button("Ungrouped") {
+                    beginScopeSwitch(to: .ungrouped)
+                }
+
+                if groups.isEmpty == false {
+                    Divider()
+
+                    ForEach(groups) { group in
+                        Button(group.name) {
+                            beginScopeSwitch(to: .group(group.id), group: group)
+                        }
                     }
                 }
-                Divider()
             }
 
-            Button("Ungrouped") {
-                beginScopeSwitch(to: .ungrouped, group: nil)
+            Divider()
+
+            Menu("Domains") {
+                Button("All Domains…") {
+                    beginScopeSwitch(to: .overall)
+                }
+
+                Divider()
+
+                Button("No Domain") {
+                    beginScopeSwitch(to: .noDomain)
+                }
+
+                if domains.isEmpty == false {
+                    Divider()
+
+                    ForEach(domains) { domain in
+                        Button(domain.name) {
+                            beginScopeSwitch(to: .domain(domain.id))
+                        }
+                    }
+                }
             }
         } label: {
             HStack(spacing: style == .compact ? 6 : 8) {
@@ -521,7 +577,7 @@ struct StudentDetailView: View {
                     .font(style == .compact ? .caption2 : .caption)
                     .foregroundColor(.secondary)
 
-                Text(selectedGroupFilter.title(groups: groups))
+                Text(selectedScope.title(groups: groups, domains: domains))
                     .font(style == .compact ? .caption2 : .caption)
                     .fontWeight(.semibold)
 
@@ -570,11 +626,11 @@ struct StudentDetailView: View {
         .help("Add a new student")
     }
 
-    private func beginScopeSwitch(to newFilter: GroupFilter, group: CohortGroup?) {
+    private func beginScopeSwitch(to newFilter: StudentFilterScope, group: CohortGroup? = nil) {
         isSwitchingScope = true
 
         withAnimation(.easeInOut(duration: 0.15)) {
-            selectedGroupFilter = newFilter
+            selectedScope = newFilter
             selectedGroup = group
         }
 
@@ -655,19 +711,25 @@ struct StudentDetailView: View {
         }
     }
 
-    private enum GroupFilter: Hashable {
-        case all
+    private enum StudentFilterScope: Hashable {
+        case overall
         case ungrouped
         case group(UUID)
+        case domain(UUID)
+        case noDomain
 
-        func title(groups: [CohortGroup]) -> String {
+        func title(groups: [CohortGroup], domains: [Domain]) -> String {
             switch self {
-            case .all:
+            case .overall:
                 return "Overall"
             case .ungrouped:
                 return "Ungrouped"
             case .group(let id):
                 return groups.first(where: { $0.id == id })?.name ?? "Group"
+            case .domain(let id):
+                return domains.first(where: { $0.id == id })?.name ?? "Domain"
+            case .noDomain:
+                return "No Domain"
             }
         }
     }
