@@ -3,7 +3,7 @@ import SwiftUI
 struct StudentOverviewBoard: View {
     @EnvironmentObject private var store: CloudKitStore
 
-    @Binding var selectedStudent: Student?
+    @Binding var selectedStudentId: UUID?
 
     @State private var showingManageStudents: Bool = false
     @State private var studentToEdit: Student?
@@ -79,7 +79,7 @@ struct StudentOverviewBoard: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
 
-            List(selection: $selectedStudent) {
+            List(selection: $selectedStudentId) {
                 Section {
                     cohortOverviewRow
                         .selectionDisabled(true)
@@ -129,7 +129,7 @@ struct StudentOverviewBoard: View {
                 Section {
                     ForEach(filteredStudents, id: \.id) { student in
                         studentRow(student)
-                            .tag(student as Student?)
+                            .tag(student.id)
                             .contextMenu {
                                 Button("Edit Student…") {
                                     beginEdit(student)
@@ -204,9 +204,6 @@ struct StudentOverviewBoard: View {
             Text(renameErrorMessage)
         }
         .onAppear {
-            if selectedStudent == nil {
-                selectedStudent = students.first
-            }
             if debouncedSearchText != searchText {
                 debouncedSearchText = searchText
             }
@@ -339,35 +336,46 @@ struct StudentOverviewBoard: View {
         }
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+        .onTapGesture {
+            if isEditing == false {
+                selectedStudentId = student.id
+            }
+        }
     }
 
     private var cohortOverviewRow: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Overall")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+        Button {
+            selectedStudentId = nil
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Overall")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
-                Text("\(cohortOverall)%")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.accentColor)
+                    Text("\(cohortOverall)%")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.accentColor)
+                }
+
+                Spacer()
+
+                CircularProgressView(progress: Double(cohortOverall) / 100.0)
+                    .frame(width: 34, height: 34)
             }
-
-            Spacer()
-
-            CircularProgressView(progress: Double(cohortOverall) / 100.0)
-                .frame(width: 34, height: 34)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
+        .help("Show cohort overview")
         .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 6, trailing: 10))
     }
 
@@ -426,7 +434,7 @@ struct StudentOverviewBoard: View {
                 domain: domain,
                 customProperties: customProperties
             ) {
-                selectedStudent = newStudent
+                selectedStudentId = newStudent.id
             }
         }
     }
@@ -455,14 +463,11 @@ struct StudentOverviewBoard: View {
     }
 
     private func deleteStudent(_ student: Student) {
-        if selectedStudent?.id == student.id {
-            selectedStudent = nil
+        if selectedStudentId == student.id {
+            selectedStudentId = nil
         }
         Task {
             await store.deleteStudent(student)
-            if selectedStudent == nil {
-                selectedStudent = students.first
-            }
         }
     }
 

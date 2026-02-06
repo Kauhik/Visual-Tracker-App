@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: CloudKitStore
 
-    @State private var selectedStudent: Student?
     @State private var selectedGroup: CohortGroup?
     @State private var showingError: Bool = false
     @State private var errorMessage: String = ""
@@ -13,9 +12,36 @@ struct ContentView: View {
         store.students
     }
 
+    private var studentIds: [UUID] {
+        students.map(\.id)
+    }
+
+    private var selectedStudent: Student? {
+        guard let selectedId = store.selectedStudentId else { return nil }
+        return students.first { $0.id == selectedId }
+    }
+
+    private var selectedStudentBinding: Binding<Student?> {
+        Binding(
+            get: { selectedStudent },
+            set: { newValue in
+                store.selectedStudentId = newValue?.id
+            }
+        )
+    }
+
+    private var selectedStudentIdBinding: Binding<UUID?> {
+        Binding(
+            get: { store.selectedStudentId },
+            set: { newValue in
+                store.selectedStudentId = newValue
+            }
+        )
+    }
+
     var body: some View {
         NavigationSplitView {
-            StudentOverviewBoard(selectedStudent: $selectedStudent)
+            StudentOverviewBoard(selectedStudentId: selectedStudentIdBinding)
                 .navigationTitle("Students")
         } detail: {
             SwiftUI.Group {
@@ -27,7 +53,7 @@ struct ContentView: View {
                     )
                 } else {
                     StudentDetailView(
-                        selectedStudent: $selectedStudent,
+                        selectedStudent: selectedStudentBinding,
                         selectedGroup: $selectedGroup
                     )
                 }
@@ -43,16 +69,9 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear {
-            if selectedStudent == nil, let first = students.first {
-                selectedStudent = first
-            }
-        }
-        .onChange(of: students.count) { _, _ in
-            if let selected = selectedStudent, students.contains(where: { $0.id == selected.id }) == false {
-                selectedStudent = students.first
-            } else if selectedStudent == nil, let first = students.first {
-                selectedStudent = first
+        .onChange(of: studentIds) { _, newIds in
+            if let selectedId = store.selectedStudentId, newIds.contains(selectedId) == false {
+                store.selectedStudentId = nil
             }
         }
         .task {
@@ -171,7 +190,7 @@ struct ContentView: View {
     private func resetData() {
         Task {
             await store.resetAllData()
-            selectedStudent = store.students.first
+            store.selectedStudentId = nil
             selectedGroup = nil
         }
     }

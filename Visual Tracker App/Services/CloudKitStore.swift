@@ -22,6 +22,8 @@ final class CloudKitStore: ObservableObject {
     @Published var domains: [Domain] = []
     @Published var categoryLabels: [CategoryLabel] = []
     @Published var learningObjectives: [LearningObjective] = LearningObjectiveCatalog.defaultObjectives()
+    @Published var selectedStudentId: UUID?
+    @Published var selectedScope: StudentFilterScope = .overall
 
     private let service: CloudKitService
     private let cohortId: String = "main"
