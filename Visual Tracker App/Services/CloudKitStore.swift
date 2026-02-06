@@ -1065,7 +1065,7 @@ final class CloudKitStore: ObservableObject {
             return
         }
 
-        syncLogger.info("Starting full reconciliation (additions + deletions)")
+        syncLogger.info("Starting full reconciliation (additions + updates + deletions)")
         
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
@@ -1082,69 +1082,42 @@ final class CloudKitStore: ObservableObject {
 
             syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
 
-            // Reconcile groups (additions + deletions)
+            // Apply ALL remote records - handles adds AND updates
+            if remoteGroups.isEmpty == false {
+                applyGroupChanges(remoteGroups)
+            }
+            if remoteDomains.isEmpty == false {
+                applyDomainChanges(remoteDomains)
+            }
+            if remoteLabels.isEmpty == false {
+                applyCategoryLabelChanges(remoteLabels)
+            }
+            if remoteStudents.isEmpty == false {
+                applyStudentChanges(remoteStudents)
+            }
+
+            // Remove locally-held records that no longer exist on server (deletions)
             let remoteGroupIDs = Set(remoteGroups.map { $0.recordID.recordName })
             let localGroupIDs = Set(groupRecordNameByID.values)
-            
-            // Add missing groups
-            let missingGroupIDs = remoteGroupIDs.subtracting(localGroupIDs)
-            if missingGroupIDs.isEmpty == false {
-                syncLogger.info("Found \(missingGroupIDs.count, privacy: .public) new groups to add")
-                let missingGroupRecords = remoteGroups.filter { missingGroupIDs.contains($0.recordID.recordName) }
-                applyGroupChanges(missingGroupRecords)
-            }
-            
-            // Remove deleted groups
-            let deletedGroupIDs = localGroupIDs.subtracting(remoteGroupIDs)
-            for recordName in deletedGroupIDs {
+            for recordName in localGroupIDs.subtracting(remoteGroupIDs) {
                 deleteGroupByRecordID(CKRecord.ID(recordName: recordName))
             }
 
-            // Reconcile domains (additions + deletions)
             let remoteDomainIDs = Set(remoteDomains.map { $0.recordID.recordName })
             let localDomainIDs = Set(domainRecordNameByID.values)
-            
-            let missingDomainIDs = remoteDomainIDs.subtracting(localDomainIDs)
-            if missingDomainIDs.isEmpty == false {
-                syncLogger.info("Found \(missingDomainIDs.count, privacy: .public) new domains to add")
-                let missingDomainRecords = remoteDomains.filter { missingDomainIDs.contains($0.recordID.recordName) }
-                applyDomainChanges(missingDomainRecords)
-            }
-            
-            let deletedDomainIDs = localDomainIDs.subtracting(remoteDomainIDs)
-            for recordName in deletedDomainIDs {
+            for recordName in localDomainIDs.subtracting(remoteDomainIDs) {
                 deleteDomainByRecordID(CKRecord.ID(recordName: recordName))
             }
 
-            // Reconcile students (additions + deletions)
             let remoteStudentIDs = Set(remoteStudents.map { $0.recordID.recordName })
             let localStudentIDs = Set(studentRecordNameByID.values)
-            
-            let missingStudentIDs = remoteStudentIDs.subtracting(localStudentIDs)
-            if missingStudentIDs.isEmpty == false {
-                syncLogger.info("Found \(missingStudentIDs.count, privacy: .public) new students to add")
-                let missingStudentRecords = remoteStudents.filter { missingStudentIDs.contains($0.recordID.recordName) }
-                applyStudentChanges(missingStudentRecords)
-            }
-            
-            let deletedStudentIDs = localStudentIDs.subtracting(remoteStudentIDs)
-            for recordName in deletedStudentIDs {
+            for recordName in localStudentIDs.subtracting(remoteStudentIDs) {
                 deleteStudentByRecordID(CKRecord.ID(recordName: recordName))
             }
 
-            // Reconcile labels (additions + deletions)
             let remoteLabelIDs = Set(remoteLabels.map { $0.recordID.recordName })
             let localLabelIDs = Set(categoryLabels.map { $0.key })
-            
-            let missingLabelIDs = remoteLabelIDs.subtracting(localLabelIDs)
-            if missingLabelIDs.isEmpty == false {
-                syncLogger.info("Found \(missingLabelIDs.count, privacy: .public) new labels to add")
-                let missingLabelRecords = remoteLabels.filter { missingLabelIDs.contains($0.recordID.recordName) }
-                applyCategoryLabelChanges(missingLabelRecords)
-            }
-            
-            let deletedLabelIDs = localLabelIDs.subtracting(remoteLabelIDs)
-            for key in deletedLabelIDs {
+            for key in localLabelIDs.subtracting(remoteLabelIDs) {
                 deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
             }
 
@@ -1166,26 +1139,20 @@ final class CloudKitStore: ObservableObject {
             let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
             let remoteProgressRecords = try await service.queryRecords(ofType: RecordType.objectiveProgress, predicate: predicate)
             
-            let remoteProgressIDs = Set(remoteProgressRecords.map { $0.recordID.recordName })
-            let localProgressIDs = Set(progressRecordNameByID.values)
-            
-            // Add missing progress records (only for loaded students)
-            let missingProgressIDs = remoteProgressIDs.subtracting(localProgressIDs)
-            if missingProgressIDs.isEmpty == false {
-                let missingRecords = remoteProgressRecords.filter { missingProgressIDs.contains($0.recordID.recordName) }
-                // Filter to only records for loaded students
-                let relevantRecords = missingRecords.filter { record in
-                    guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
-                    guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
-                    return progressLoadedStudentIDs.contains(uuid)
-                }
-                if relevantRecords.isEmpty == false {
-                    syncLogger.info("Found \(relevantRecords.count, privacy: .public) new progress records to add")
-                    applyProgressChanges(relevantRecords)
-                }
+            // Apply ALL remote progress records for loaded students (handles adds AND updates)
+            let relevantRecords = remoteProgressRecords.filter { record in
+                guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
+                guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
+                return progressLoadedStudentIDs.contains(uuid)
+            }
+            if relevantRecords.isEmpty == false {
+                syncLogger.info("Applying \(relevantRecords.count, privacy: .public) progress records (adds + updates)")
+                applyProgressChanges(relevantRecords)
             }
             
             // Remove deleted progress records
+            let remoteProgressIDs = Set(remoteProgressRecords.map { $0.recordID.recordName })
+            let localProgressIDs = Set(progressRecordNameByID.values)
             let deletedProgressIDs = localProgressIDs.subtracting(remoteProgressIDs)
             for recordName in deletedProgressIDs {
                 deleteProgressByRecordID(CKRecord.ID(recordName: recordName))
@@ -1202,26 +1169,20 @@ final class CloudKitStore: ObservableObject {
             let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
             let remoteCustomPropRecords = try await service.queryRecords(ofType: RecordType.studentCustomProperty, predicate: predicate)
             
-            let remoteCustomPropIDs = Set(remoteCustomPropRecords.map { $0.recordID.recordName })
-            let localCustomPropIDs = Set(customPropertyRecordNameByID.values)
-            
-            // Add missing custom property records (only for loaded students)
-            let missingCustomPropIDs = remoteCustomPropIDs.subtracting(localCustomPropIDs)
-            if missingCustomPropIDs.isEmpty == false {
-                let missingRecords = remoteCustomPropRecords.filter { missingCustomPropIDs.contains($0.recordID.recordName) }
-                // Filter to only records for loaded students
-                let relevantRecords = missingRecords.filter { record in
-                    guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
-                    guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
-                    return customPropertiesLoadedStudentIDs.contains(uuid)
-                }
-                if relevantRecords.isEmpty == false {
-                    syncLogger.info("Found \(relevantRecords.count, privacy: .public) new custom property records to add")
-                    applyCustomPropertyChanges(relevantRecords)
-                }
+            // Apply ALL remote custom property records for loaded students (handles adds AND updates)
+            let relevantRecords = remoteCustomPropRecords.filter { record in
+                guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
+                guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
+                return customPropertiesLoadedStudentIDs.contains(uuid)
+            }
+            if relevantRecords.isEmpty == false {
+                syncLogger.info("Applying \(relevantRecords.count, privacy: .public) custom property records (adds + updates)")
+                applyCustomPropertyChanges(relevantRecords)
             }
             
             // Remove deleted custom property records
+            let remoteCustomPropIDs = Set(remoteCustomPropRecords.map { $0.recordID.recordName })
+            let localCustomPropIDs = Set(customPropertyRecordNameByID.values)
             let deletedCustomPropIDs = localCustomPropIDs.subtracting(remoteCustomPropIDs)
             for recordName in deletedCustomPropIDs {
                 deleteCustomPropertyByRecordID(CKRecord.ID(recordName: recordName))

@@ -17,7 +17,6 @@ final class CloudKitSyncCoordinator {
         case poll
         case appBecameActive
         case windowFocused
-        case reconcile
     }
 
     private unowned let store: CloudKitStore
@@ -28,7 +27,6 @@ final class CloudKitSyncCoordinator {
 
     private var debouncedTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
-    private var reconcileTask: Task<Void, Never>?
 
     private var notificationToken: NSObjectProtocol?
     private var appActiveToken: NSObjectProtocol?
@@ -123,7 +121,7 @@ final class CloudKitSyncCoordinator {
         }
         logger.info("Registered for window focus observer")
 
-        // Start polling fallback (10 second interval)
+        // Poll every 10 seconds - full reconciliation catches creates, updates, AND deletions
         pollingTask = Task { @MainActor [weak self] in
             guard let self else { return }
             self.logger.info("Starting polling task (10s interval)")
@@ -138,22 +136,7 @@ final class CloudKitSyncCoordinator {
             }
         }
 
-        // Periodic reconcile for deletions and externally-created records
-        reconcileTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.logger.info("Starting reconcile task (1 min interval)")
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60_000_000_000) // 1 minute
-                if Task.isCancelled {
-                    self.logger.info("Reconcile task cancelled")
-                    break
-                }
-                self.logger.debug("Reconcile timer fired")
-                self.triggerSync(reason: .reconcile)
-            }
-        }
-
-        // Kick off initial subscription setup + an initial sync
+        // Kick off initial subscription setup + initial sync
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.logger.info("Setting up subscriptions and triggering initial sync")
@@ -166,7 +149,6 @@ final class CloudKitSyncCoordinator {
         logger.info("Stopping CloudKit live sync coordinator")
         debouncedTask?.cancel()
         pollingTask?.cancel()
-        reconcileTask?.cancel()
 
         if let token = notificationToken {
             NotificationCenter.default.removeObserver(token)
@@ -188,14 +170,13 @@ final class CloudKitSyncCoordinator {
 
     /// Triggers a sync with a short debounce to coalesce rapid events
     func triggerSync(reason: TriggerReason) {
-        logger.info("Sync triggered: reason=\(reason.rawValue, privacy: .public)")
         lastSyncTrigger = (reason, Date())
         
-        // Debounce bursts of triggers (pushes, multiple writes, etc.)
+        // Debounce bursts of triggers
         debouncedTask?.cancel()
         debouncedTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s debounce (fast!)
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s debounce
             if Task.isCancelled {
                 self.logger.debug("Debounced sync task cancelled")
                 return
@@ -204,12 +185,11 @@ final class CloudKitSyncCoordinator {
         }
     }
     
-    /// Triggers a sync immediately with NO debounce - use for user-initiated actions
+    /// Triggers a sync immediately with NO debounce
     func triggerImmediateSync(reason: TriggerReason) {
         logger.info("Sync triggered (immediate): reason=\(reason.rawValue, privacy: .public)")
         lastSyncTrigger = (reason, Date())
         
-        // Cancel any pending debounced sync
         debouncedTask?.cancel()
         debouncedTask = nil
         
@@ -218,23 +198,14 @@ final class CloudKitSyncCoordinator {
         }
     }
     
-    /// Executes the actual sync operation
+    /// Every sync is a full reconciliation - catches creates, updates, AND deletions
     private func executeSync(reason: TriggerReason) async {
         syncCount += 1
         let syncNumber = syncCount
         logger.info("Executing sync #\(syncNumber, privacy: .public) for reason: \(reason.rawValue, privacy: .public)")
-
-        switch reason {
-        case .reconcile:
-            logger.info("Performing full reconciliation (additions + deletions)")
-            await store.reconcileWithServer()
-            logger.info("Sync #\(syncNumber, privacy: .public) completed (full reconcile)")
-            return
-        default:
-            break
-        }
-
-        await store.performIncrementalSync()
+        
+        await store.reconcileWithServer()
+        
         logger.info("Sync #\(syncNumber, privacy: .public) completed")
     }
 
@@ -252,7 +223,6 @@ final class CloudKitSyncCoordinator {
             info += "  lastSyncTrigger: \(trigger.reason.rawValue) at \(trigger.date)\n"
         }
         info += "  pollingTask active: \(pollingTask != nil && !pollingTask!.isCancelled)\n"
-        info += "  reconcileTask active: \(reconcileTask != nil && !reconcileTask!.isCancelled)\n"
         return info
     }
 
@@ -335,7 +305,6 @@ final class CloudKitSyncCoordinator {
             logger.info("✓ Saved CloudKit subscription: id=\(subscriptionID, privacy: .public) type=\(recordType, privacy: .public)")
             return true
         } catch {
-            // If subscriptions fail (APNs/entitlement/config), polling continues as fallback.
             let errorDesc = service.describe(error)
             logger.error("✗ Failed to save CloudKit subscription: id=\(subscriptionID, privacy: .public) type=\(recordType, privacy: .public) error=\(errorDesc, privacy: .public)")
             return false
@@ -343,16 +312,16 @@ final class CloudKitSyncCoordinator {
     }
 
     private func handleRemoteNotification(userInfo: [AnyHashable: Any]) async {
-        logger.info("Handling remote notification with userInfo keys: \(Array(userInfo.keys).map { String(describing: $0) }.joined(separator: ", "), privacy: .public)")
+        logger.info("Handling remote notification")
         
         guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo) else {
-            logger.info("Remote notification missing CKNotification payload; triggering sync anyway")
+            logger.info("Remote notification missing CKNotification payload; triggering sync")
             triggerImmediateSync(reason: .push)
             return
         }
 
         guard let query = notification as? CKQueryNotification else {
-            logger.info("Remote notification is not a CKQueryNotification (type: \(String(describing: type(of: notification)), privacy: .public)); triggering sync")
+            logger.info("Remote notification is not a CKQueryNotification; triggering sync")
             triggerImmediateSync(reason: .push)
             return
         }
@@ -371,23 +340,18 @@ final class CloudKitSyncCoordinator {
             
             logger.info("📬 Remote change: type=\(recordType, privacy: .public) id=\(recordID.recordName.prefix(8), privacy: .public)... reason=\(reasonStr, privacy: .public)")
             
+            // Apply the specific change immediately for instant feedback
             switch query.queryNotificationReason {
             case .recordDeleted:
-                logger.info("Applying remote deletion for \(recordType, privacy: .public)")
                 store.applyRemoteDeletion(recordType: recordType, recordID: recordID)
             case .recordCreated, .recordUpdated:
-                logger.info("Fetching and applying remote record for \(recordType, privacy: .public)")
                 await store.fetchAndApplyRemoteRecord(recordType: recordType, recordID: recordID)
             @unknown default:
-                logger.warning("Unknown query notification reason")
                 break
             }
-        } else {
-            logger.info("Could not extract record info from notification (subscriptionID: \(subscriptionID, privacy: .public))")
         }
 
-        // Always follow up with an incremental sync to catch coalesced/missed changes.
-        logger.info("Following up push with incremental sync")
-        triggerSync(reason: .push)
+        // Follow up with full reconciliation to catch anything missed
+        triggerImmediateSync(reason: .push)
     }
 }
