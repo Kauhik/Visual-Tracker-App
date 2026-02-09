@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StudentOverviewBoard: View {
     @EnvironmentObject private var store: CloudKitStore
+    @EnvironmentObject private var activityCenter: ActivityCenter
     @Environment(ZoomManager.self) private var zoomManager
     @Binding var selectedStudentId: UUID?
 
@@ -469,7 +470,9 @@ struct StudentOverviewBoard: View {
 
     private func beginEdit(_ student: Student) {
         Task {
-            await store.loadCustomPropertiesIfNeeded(for: student)
+            await activityCenter.run(message: "Loading student details…", tag: .detail) {
+                await store.loadCustomPropertiesIfNeeded(for: student)
+            }
             studentToEdit = student
         }
     }

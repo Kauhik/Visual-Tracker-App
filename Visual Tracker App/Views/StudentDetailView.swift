@@ -5,6 +5,7 @@ struct StudentDetailView: View {
     @Binding var selectedGroup: CohortGroup?
 
     @EnvironmentObject private var store: CloudKitStore
+    @EnvironmentObject private var activityCenter: ActivityCenter
     @Environment(ZoomManager.self) private var zoomManager
 
     @State private var showingAddSheet: Bool = false
@@ -178,6 +179,18 @@ struct StudentDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: zoomManager.scaled(18)) {
+                if activityCenter.isVisible && activityCenter.tag == .detail {
+                    HStack(spacing: zoomManager.scaled(8)) {
+                        ProgressView()
+                            .controlSize(.small)
+
+                        Text(activityCenter.message ?? "Loading…")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, zoomManager.scaled(4))
+                }
+
                 unifiedOverviewContainer
 
                 studentBoardSection
@@ -258,8 +271,10 @@ struct StudentDetailView: View {
         }
         .task(id: selectedStudent?.id) {
             if let selectedStudent {
-                await store.loadProgressIfNeeded(for: selectedStudent)
-                await store.loadCustomPropertiesIfNeeded(for: selectedStudent)
+                await activityCenter.run(message: "Loading student details…", tag: .detail) {
+                    await store.loadProgressIfNeeded(for: selectedStudent)
+                    await store.loadCustomPropertiesIfNeeded(for: selectedStudent)
+                }
             }
         }
     }

@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: CloudKitStore
+    @EnvironmentObject private var activityCenter: ActivityCenter
     @Environment(ZoomManager.self) private var zoomManager
 
     @State private var selectedGroup: CohortGroup?
     @State private var showingError: Bool = false
     @State private var errorMessage: String = ""
     @State private var showingICloudPrompt: Bool = false
+    @State private var loadingActivityToken: UUID?
 
     private var students: [Student] {
         store.students
@@ -63,6 +65,9 @@ struct ContentView: View {
         }
         .dynamicTypeSize(zoomManager.dynamicTypeSize)
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                ActivityStatusView(activity: activityCenter)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("Reset Data", role: .destructive) { resetData() }
@@ -187,6 +192,16 @@ struct ContentView: View {
                 showingICloudPrompt = true
             }
         }
+        .onChange(of: store.isLoading) { _, newValue in
+            if newValue {
+                if loadingActivityToken == nil {
+                    loadingActivityToken = activityCenter.begin(message: "Loading cloud data…")
+                }
+            } else if let token = loadingActivityToken {
+                activityCenter.end(token)
+                loadingActivityToken = nil
+            }
+        }
     }
 
     private func resetData() {
@@ -201,5 +216,6 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environmentObject(CloudKitStore(usePreviewData: true))
+        .environmentObject(ActivityCenter())
         .environment(ZoomManager())
 }

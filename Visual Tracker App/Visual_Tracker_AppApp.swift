@@ -4,12 +4,14 @@ import SwiftUI
 struct Visual_Tracker_AppApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store = CloudKitStore()
+    @StateObject private var activityCenter = ActivityCenter()
     @State private var zoomManager = ZoomManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(activityCenter)
                 .environment(zoomManager)
         }
         .commands {
