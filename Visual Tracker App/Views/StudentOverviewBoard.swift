@@ -402,9 +402,12 @@ struct StudentOverviewBoard: View {
         )
 
         return HStack(spacing: zoomManager.scaled(10)) {
-            Text(category.code)
-                .font(zoomManager.scaledFont(size: 13, weight: .bold, design: .rounded))
+            Text(category.code.uppercased())
+                .font(zoomManager.scaledFont(size: 14, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(minWidth: zoomManager.scaled(22), alignment: .center)
                 .padding(.horizontal, zoomManager.scaled(8))
                 .padding(.vertical, zoomManager.scaled(4))
                 .background(
@@ -428,8 +431,9 @@ struct StudentOverviewBoard: View {
             Spacer()
 
             Text("\(value)%")
-                .font(.system(.caption, design: .monospaced))
+                .font(zoomManager.scaledFont(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundColor(.secondary)
+                .frame(minWidth: zoomManager.scaled(32), alignment: .trailing)
         }
         .padding(.vertical, zoomManager.scaled(8))
         .padding(.horizontal, zoomManager.scaled(10))

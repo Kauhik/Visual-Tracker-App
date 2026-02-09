@@ -402,9 +402,12 @@ struct StudentDetailView: View {
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
-            Text(category.code)
-                .font(zoomManager.scaledFont(size: 14, weight: .bold, design: .rounded))
+            Text(category.code.uppercased())
+                .font(zoomManager.scaledFont(size: 15, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(minWidth: zoomManager.scaled(24), alignment: .center)
                 .padding(.horizontal, zoomManager.scaled(8))
                 .padding(.vertical, zoomManager.scaled(4))
                 .background(
@@ -431,8 +434,9 @@ struct StudentDetailView: View {
 
             HStack(spacing: zoomManager.scaled(10)) {
                 Text("\(value)%")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(zoomManager.scaledFont(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundColor(.secondary)
+                    .frame(minWidth: zoomManager.scaled(32), alignment: .trailing)
 
                 CircularProgressView(progress: Double(value) / 100.0)
                     .frame(width: zoomManager.scaled(28), height: zoomManager.scaled(28))
