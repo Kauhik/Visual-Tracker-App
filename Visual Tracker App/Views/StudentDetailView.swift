@@ -385,7 +385,6 @@ struct StudentDetailView: View {
 
     private func overviewCategoryRow(_ category: LearningObjective) -> some View {
         let value: Int
-        let label: String
 
         switch displayMode {
         case .student(let student):
@@ -394,20 +393,17 @@ struct StudentDetailView: View {
                 objectiveCode: category.code,
                 allObjectives: allObjectives
             )
-            label = "Progress for \(category.code)"
         case .overview:
             value = ProgressCalculator.cohortObjectiveAverage(
                 objectiveCode: category.code,
                 students: breakdownStudents,
                 allObjectives: allObjectives
             )
-            label = "Average for \(category.code)"
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
             Text(category.code)
-                .font(.system(.caption, design: .rounded))
-                .fontWeight(.bold)
+                .font(zoomManager.scaledFont(size: 14, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .padding(.horizontal, zoomManager.scaled(8))
                 .padding(.vertical, zoomManager.scaled(4))
@@ -418,7 +414,7 @@ struct StudentDetailView: View {
 
             VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text(categoryDisplayTitle(for: category))
-                    .font(.subheadline)
+                    .font(.callout)
                     .foregroundColor(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -429,10 +425,6 @@ struct StudentDetailView: View {
                             editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
                         }
                     }
-
-                Text(label)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
             }
 
             Spacer()

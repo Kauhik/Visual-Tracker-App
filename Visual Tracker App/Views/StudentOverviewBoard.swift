@@ -403,8 +403,7 @@ struct StudentOverviewBoard: View {
 
         return HStack(spacing: zoomManager.scaled(10)) {
             Text(category.code)
-                .font(.system(.caption, design: .rounded))
-                .fontWeight(.bold)
+                .font(zoomManager.scaledFont(size: 13, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .padding(.horizontal, zoomManager.scaled(8))
                 .padding(.vertical, zoomManager.scaled(4))
@@ -414,7 +413,7 @@ struct StudentOverviewBoard: View {
                 )
 
             Text(categoryDisplayTitle(for: category))
-                .font(.caption)
+                .font(.callout)
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
