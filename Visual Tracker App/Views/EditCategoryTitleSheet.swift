@@ -3,6 +3,7 @@ import SwiftUI
 struct EditCategoryTitleSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     let code: String
     let fallbackTitle: String
@@ -16,7 +17,7 @@ struct EditCategoryTitleSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             Text("Edit Category Title")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -44,8 +45,8 @@ struct EditCategoryTitleSheet: View {
                 .disabled(trimmedTitle.isEmpty)
             }
         }
-        .padding(20)
-        .frame(width: 520)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(520))
         .alert("Save Failed", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {

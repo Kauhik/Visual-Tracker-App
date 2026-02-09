@@ -3,6 +3,7 @@ import SwiftUI
 struct AddStudentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     private var groups: [CohortGroup] { store.groups }
     private var domains: [Domain] { store.domains }
@@ -64,7 +65,7 @@ struct AddStudentSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             Text(sheetTitle)
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -109,10 +110,10 @@ struct AddStudentSheet: View {
                             .foregroundColor(.secondary)
                     } else {
                         ForEach($customPropertyRows) { $row in
-                            HStack(spacing: 8) {
+                            HStack(spacing: zoomManager.scaled(8)) {
                                 TextField("Key", text: $row.key)
                                     .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: 140)
+                                    .frame(maxWidth: zoomManager.scaled(140))
 
                                 TextField("Value", text: $row.value)
                                     .textFieldStyle(.roundedBorder)
@@ -155,8 +156,8 @@ struct AddStudentSheet: View {
                 .disabled(!canSave)
             }
         }
-        .padding(20)
-        .frame(width: 480, height: 520)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(480), height: zoomManager.scaled(520))
         .alert("Validation Error", isPresented: $showingValidationError) {
             Button("OK", role: .cancel) { }
         } message: {

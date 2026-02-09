@@ -5,6 +5,7 @@ struct GroupPickerView: View {
     @Binding var selectedGroup: CohortGroup?
 
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     private var groups: [CohortGroup] { store.groups }
 
@@ -18,10 +19,10 @@ struct GroupPickerView: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: zoomManager.scaled(8)) {
                 Circle()
                     .fill(groupDisplayColor)
-                    .frame(width: 10, height: 10)
+                    .frame(width: zoomManager.scaled(10), height: zoomManager.scaled(10))
 
                 Text(title)
                     .font(.caption)
@@ -30,19 +31,23 @@ struct GroupPickerView: View {
                 Text(selectedGroup?.name ?? "Ungrouped")
                     .font(.caption)
                     .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(selectedGroup?.name ?? "Ungrouped")
+                    .layoutPriority(1)
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, zoomManager.scaled(10))
+            .padding(.vertical, zoomManager.scaled(6))
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }

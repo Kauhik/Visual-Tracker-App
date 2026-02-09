@@ -5,6 +5,7 @@ struct StudentDetailView: View {
     @Binding var selectedGroup: CohortGroup?
 
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     @State private var showingAddSheet: Bool = false
     @State private var studentPendingDelete: Student?
@@ -176,14 +177,14 @@ struct StudentDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(18)) {
                 unifiedOverviewContainer
 
                 studentBoardSection
 
                 if let student = selectedStudent, eligibleStudentCount > 0 {
                     legendView
-                        .padding(.top, 2)
+                        .padding(.top, zoomManager.scaled(2))
 
                     Divider()
                         .opacity(0.25)
@@ -206,7 +207,7 @@ struct StudentDetailView: View {
                             description: Text(emptyScopeDescription)
                         )
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, zoomManager.scaled(12))
                     } else {
                         ContentUnavailableView(
                             "No Student Selected",
@@ -214,11 +215,11 @@ struct StudentDetailView: View {
                             description: Text("Select a student from the board to view progress details.")
                         )
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, zoomManager.scaled(12))
                     }
                 }
             }
-            .padding(20)
+            .padding(zoomManager.scaled(20))
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingAddSheet) {
@@ -264,7 +265,7 @@ struct StudentDetailView: View {
     }
 
     private var unifiedOverviewContainer: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(14)) {
             overviewHeaderRow
 
             if eligibleStudentCount == 0 {
@@ -277,7 +278,7 @@ struct StudentDetailView: View {
                     description: Text(emptyScopeDescription)
                 )
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
+                .padding(.vertical, zoomManager.scaled(6))
             } else {
                 Divider()
                     .opacity(0.22)
@@ -285,25 +286,25 @@ struct StudentDetailView: View {
                 overviewBreakdownSection
             }
         }
-        .padding(20)
+        .padding(zoomManager.scaled(20))
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(16))
                 .fill(Color(nsColor: .controlBackgroundColor))
-                .shadow(color: .black.opacity(0.12), radius: 6, x: 0, y: 2)
+                .shadow(color: .black.opacity(0.12), radius: zoomManager.scaled(6), x: 0, y: 2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(16))
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
     }
 
     private var overviewHeaderRow: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: zoomManager.scaled(16)) {
             if let selectedStudent {
                 studentAvatar(for: selectedStudent)
             } else {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                         .fill(
                             LinearGradient(
                                 colors: [.blue.opacity(0.18), .purple.opacity(0.18)],
@@ -311,47 +312,54 @@ struct StudentDetailView: View {
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 64, height: 64)
+                        .frame(width: zoomManager.scaled(64), height: zoomManager.scaled(64))
 
                     Image(systemName: scopeIconSystemName)
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(zoomManager.scaledFont(size: 26, weight: .semibold))
                         .foregroundColor(.accentColor)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(8)) {
                 Text(headerTitle)
                     .font(.largeTitle)
                     .fontWeight(.bold)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(headerTitle)
 
                 Text(headerSubtitle)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(headerSubtitle)
 
                 overviewFilterMenu
             }
+            .layoutPriority(1)
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: zoomManager.scaled(4)) {
                 Text("Overall Progress")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                HStack(spacing: 8) {
+                HStack(spacing: zoomManager.scaled(8)) {
                     Text("\(headerOverallProgress)%")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .font(zoomManager.scaledFont(size: 36, weight: .bold, design: .rounded))
                         .foregroundColor(.accentColor)
 
                     CircularProgressView(progress: Double(headerOverallProgress) / 100.0)
-                        .frame(width: 50, height: 50)
+                        .frame(width: zoomManager.scaled(50), height: zoomManager.scaled(50))
                 }
             }
         }
     }
 
     private var overviewBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(12)) {
             HStack {
                 Text("A–E Summary")
                     .font(.headline)
@@ -361,9 +369,13 @@ struct StudentDetailView: View {
                 Text(summaryContextTitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(summaryContextTitle)
+                    .layoutPriority(1)
             }
 
-            VStack(spacing: 10) {
+            VStack(spacing: zoomManager.scaled(10)) {
                 ForEach(rootCategories) { category in
                     overviewCategoryRow(category)
                 }
@@ -392,23 +404,26 @@ struct StudentDetailView: View {
             label = "Average for \(category.code)"
         }
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: zoomManager.scaled(12)) {
             Text(category.code)
                 .font(.system(.caption, design: .rounded))
                 .fontWeight(.bold)
                 .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, zoomManager.scaled(8))
+                .padding(.vertical, zoomManager.scaled(4))
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                         .fill(categoryColor(for: category.code))
                 )
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text(categoryDisplayTitle(for: category))
                     .font(.subheadline)
                     .foregroundColor(.primary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(categoryDisplayTitle(for: category))
+                    .layoutPriority(1)
                     .contextMenu {
                         Button("Edit Title...") {
                             editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
@@ -422,23 +437,23 @@ struct StudentDetailView: View {
 
             Spacer()
 
-            HStack(spacing: 10) {
+            HStack(spacing: zoomManager.scaled(10)) {
                 Text("\(value)%")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.secondary)
 
                 CircularProgressView(progress: Double(value) / 100.0)
-                    .frame(width: 28, height: 28)
+                    .frame(width: zoomManager.scaled(28), height: zoomManager.scaled(28))
             }
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
+        .padding(.vertical, zoomManager.scaled(10))
+        .padding(.horizontal, zoomManager.scaled(12))
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
     }
@@ -474,26 +489,26 @@ struct StudentDetailView: View {
     }
 
     private var legendView: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: zoomManager.scaled(18)) {
             Text("Legend:")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 6) {
+            HStack(spacing: zoomManager.scaled(6)) {
                 Text("✅")
                 Text("Complete (100%)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: zoomManager.scaled(6)) {
                 Text("☑️")
                 Text("In Progress (1-99%)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: zoomManager.scaled(6)) {
                 Text("⬜")
                 Text("Not Started (0%)")
                     .font(.caption)
@@ -506,12 +521,12 @@ struct StudentDetailView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, zoomManager.scaled(8))
     }
 
     private var studentBoardSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
+            HStack(spacing: zoomManager.scaled(10)) {
                 Text("Student Board")
                     .font(.headline)
 
@@ -528,10 +543,10 @@ struct StudentDetailView: View {
                     description: Text("Change the filter to see students.")
                 )
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, zoomManager.scaled(12))
             } else {
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: zoomManager.scaled(12)) {
                         ForEach(boardStudents) { boardStudent in
                             let overall = ProgressCalculator.studentOverall(student: boardStudent, allObjectives: allObjectives)
 
@@ -552,7 +567,7 @@ struct StudentDetailView: View {
                                     move(student: boardStudent, to: group)
                                 }
                             )
-                            .frame(width: 240)
+                            .frame(width: zoomManager.scaled(240))
                             .task {
                                 await store.loadProgressIfNeeded(for: boardStudent)
                             }
@@ -562,18 +577,18 @@ struct StudentDetailView: View {
                             addStudentCard
                         }
                     }
-                    .padding(.vertical, 2)
+                    .padding(.vertical, zoomManager.scaled(2))
                 }
                 .scrollIndicators(.hidden)
             }
         }
-        .padding(16)
+        .padding(zoomManager.scaled(16))
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(16))
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(16))
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
     }
@@ -642,7 +657,7 @@ struct StudentDetailView: View {
                 }
             }
         } label: {
-            HStack(spacing: style == .compact ? 6 : 8) {
+            HStack(spacing: zoomManager.scaled(style == .compact ? 6 : 8)) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .foregroundColor(.secondary)
 
@@ -653,19 +668,23 @@ struct StudentDetailView: View {
                 Text(selectedScope.title(groups: groups, domains: domains))
                     .font(style == .compact ? .caption2 : .caption)
                     .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(selectedScope.title(groups: groups, domains: domains))
+                    .layoutPriority(1)
 
                 Image(systemName: "chevron.down")
                     .font(style == .compact ? .caption2 : .caption2)
                     .foregroundColor(.secondary)
             }
-            .padding(.horizontal, style == .compact ? 8 : 10)
-            .padding(.vertical, style == .compact ? 4 : 6)
+            .padding(.horizontal, zoomManager.scaled(style == .compact ? 8 : 10))
+            .padding(.vertical, zoomManager.scaled(style == .compact ? 4 : 6))
             .background(
-                RoundedRectangle(cornerRadius: style == .compact ? 8 : 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(style == .compact ? 8 : 10))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: style == .compact ? 8 : 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(style == .compact ? 8 : 10))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }
@@ -676,22 +695,22 @@ struct StudentDetailView: View {
         Button {
             showingAddSheet = true
         } label: {
-            VStack(spacing: 10) {
+            VStack(spacing: zoomManager.scaled(10)) {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 34, weight: .semibold))
+                    .font(zoomManager.scaledFont(size: 34, weight: .semibold))
                     .foregroundColor(.accentColor)
 
                 Text("Add Student")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .frame(width: 160, height: 120)
+            .frame(width: zoomManager.scaled(160), height: zoomManager.scaled(120))
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                     .stroke(Color.primary.opacity(0.10), lineWidth: 1)
             )
         }
@@ -760,10 +779,10 @@ struct StudentDetailView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 64, height: 64)
+                .frame(width: zoomManager.scaled(64), height: zoomManager.scaled(64))
 
             Text(student.name.prefix(1).uppercased())
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(zoomManager.scaledFont(size: 26, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
         }
     }

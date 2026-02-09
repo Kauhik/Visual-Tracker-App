@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     @State private var selectedGroup: CohortGroup?
     @State private var showingError: Bool = false
@@ -60,6 +61,7 @@ struct ContentView: View {
             }
             .navigationTitle("Visual Tracker")
         }
+        .dynamicTypeSize(zoomManager.dynamicTypeSize)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -82,7 +84,7 @@ struct ContentView: View {
             if let resetProgress = store.resetProgress {
                 ZStack {
                     Color.black.opacity(0.12).ignoresSafeArea()
-                    VStack(spacing: 12) {
+                    VStack(spacing: zoomManager.scaled(12)) {
                         ProgressView(
                             value: Double(resetProgress.step),
                             total: Double(max(resetProgress.totalSteps, 1))
@@ -94,13 +96,13 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    .padding(20)
+                    .padding(zoomManager.scaled(20))
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                             .fill(Color(nsColor: .windowBackgroundColor))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                             .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                     )
                 }
@@ -108,13 +110,13 @@ struct ContentView: View {
                 ZStack {
                     Color.black.opacity(0.12).ignoresSafeArea()
                     ProgressView("Loading Cloud Data…")
-                        .padding(20)
+                        .padding(zoomManager.scaled(20))
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                                 .fill(Color(nsColor: .windowBackgroundColor))
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                         )
                 }
@@ -122,11 +124,11 @@ struct ContentView: View {
         }
         .overlay(alignment: .top) {
             if store.requiresICloudLogin {
-                HStack(spacing: 12) {
+                HStack(spacing: zoomManager.scaled(12)) {
                     Image(systemName: "icloud.slash")
                         .font(.title3)
 
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                         Text("Read-only mode")
                             .font(.subheadline)
                             .fontWeight(.semibold)
@@ -147,15 +149,15 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                .padding(12)
+                .padding(zoomManager.scaled(12))
                 .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(12)))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                         .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                 )
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+                .padding(.horizontal, zoomManager.scaled(16))
+                .padding(.top, zoomManager.scaled(12))
             }
         }
         .alert("CloudKit Error", isPresented: $showingError) {
@@ -199,4 +201,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environmentObject(CloudKitStore(usePreviewData: true))
+        .environment(ZoomManager())
 }

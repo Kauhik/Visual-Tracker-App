@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct StudentCardView: View {
+    @Environment(ZoomManager.self) private var zoomManager
+
     let student: Student
     let overallProgress: Int
     let isSelected: Bool
@@ -11,38 +13,41 @@ struct StudentCardView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 11) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(11)) {
+                HStack(spacing: zoomManager.scaled(10)) {
                     avatar
 
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: zoomManager.scaled(6)) {
                         Text(student.name)
                             .font(.headline)
                             .foregroundColor(.primary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(student.name)
 
                         metadataBadges
                     }
+                    .layoutPriority(1)
 
                     Spacer()
 
                     ZStack {
                         CircularProgressView(progress: Double(overallProgress) / 100.0)
-                            .frame(width: 34, height: 34)
+                            .frame(width: zoomManager.scaled(34), height: zoomManager.scaled(34))
 
                         Text("\(overallProgress)%")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .font(zoomManager.scaledFont(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.primary)
                     }
                 }
             }
-            .padding(12)
+            .padding(zoomManager.scaled(12))
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                     .stroke(isSelected ? Color.accentColor.opacity(0.9) : Color.secondary.opacity(0.35), lineWidth: isSelected ? 2 : 1)
             )
             .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
@@ -79,10 +84,10 @@ struct StudentCardView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 40, height: 40)
+                .frame(width: zoomManager.scaled(40), height: zoomManager.scaled(40))
 
             Text(student.name.prefix(1).uppercased())
-                .font(.system(size: 19, weight: .bold, design: .rounded))
+                .font(zoomManager.scaledFont(size: 19, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
         }
     }
@@ -91,33 +96,34 @@ struct StudentCardView: View {
         let name = student.group?.name ?? "Ungrouped"
         let color = Color(hex: student.group?.colorHex) ?? Color.secondary.opacity(0.25)
 
-        let groupPill = HStack(spacing: 6) {
+        let groupPill = HStack(spacing: zoomManager.scaled(6)) {
             Circle()
                 .fill(color)
-                .frame(width: 8, height: 8)
+                .frame(width: zoomManager.scaled(8), height: zoomManager.scaled(8))
 
             Text(name)
                 .font(.caption2)
                 .foregroundColor(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(name)
         }
 
         let domainName = student.domain?.name ?? "No Domain"
-        let sessionPill = Text("\(student.session.rawValue) • \(domainName)")
+        let sessionLabel = "\(student.session.rawValue) • \(domainName)"
+        let sessionPill = Text(sessionLabel)
             .font(.caption2)
             .foregroundColor(.secondary)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(sessionLabel)
 
         return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) {
+            HStack(spacing: zoomManager.scaled(6)) {
                 pill(groupPill)
                 pill(sessionPill)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(6)) {
                 pill(groupPill)
                 pill(sessionPill)
             }
@@ -126,14 +132,14 @@ struct StudentCardView: View {
 
     private func pill<Content: View>(_ content: Content) -> some View {
         content
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, zoomManager.scaled(8))
+            .padding(.vertical, zoomManager.scaled(4))
             .background(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
     }

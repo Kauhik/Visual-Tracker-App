@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProgressEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ZoomManager.self) private var zoomManager
 
     let title: String
     let currentValue: Int
@@ -22,9 +23,9 @@ struct ProgressEditorView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                     Text("Set Progress")
                         .font(.headline)
 
@@ -36,14 +37,14 @@ struct ProgressEditorView: View {
                 Spacer()
 
                 Text("\(clampedIntValue)%")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(zoomManager.scaledFont(size: 28, weight: .bold, design: .rounded))
                     .foregroundColor(.accentColor)
             }
 
             Slider(value: $sliderValue, in: 0...100, step: 5)
-                .frame(maxWidth: 340)
+                .frame(maxWidth: zoomManager.scaled(340))
 
-            HStack(spacing: 8) {
+            HStack(spacing: zoomManager.scaled(8)) {
                 quickButton(0)
                 quickButton(25)
                 quickButton(50)
@@ -54,7 +55,7 @@ struct ProgressEditorView: View {
             Divider()
                 .opacity(0.25)
 
-            HStack(spacing: 10) {
+            HStack(spacing: zoomManager.scaled(10)) {
                 Button("Cancel") {
                     dismiss()
                 }
@@ -81,8 +82,8 @@ struct ProgressEditorView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(16)
-        .frame(width: 360)
+        .padding(zoomManager.scaled(16))
+        .frame(width: zoomManager.scaled(360))
     }
 
     private func quickButton(_ value: Int) -> some View {

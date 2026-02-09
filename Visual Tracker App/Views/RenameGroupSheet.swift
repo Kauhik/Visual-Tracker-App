@@ -3,6 +3,7 @@ import SwiftUI
 struct RenameGroupSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     let group: CohortGroup
 
@@ -13,7 +14,7 @@ struct RenameGroupSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             Text("Rename Group")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -37,8 +38,8 @@ struct RenameGroupSheet: View {
                 .disabled(trimmed.isEmpty)
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(420))
         .onAppear {
             name = group.name
         }

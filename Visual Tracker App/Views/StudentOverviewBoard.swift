@@ -2,7 +2,7 @@ import SwiftUI
 
 struct StudentOverviewBoard: View {
     @EnvironmentObject private var store: CloudKitStore
-
+    @Environment(ZoomManager.self) private var zoomManager
     @Binding var selectedStudentId: UUID?
 
     @State private var showingManageStudents: Bool = false
@@ -71,13 +71,13 @@ struct StudentOverviewBoard: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, zoomManager.scaled(12))
+                .padding(.top, zoomManager.scaled(12))
+                .padding(.bottom, zoomManager.scaled(8))
 
             sidebarSearchBar
-                .padding(.horizontal, 12)
-                .padding(.bottom, 6)
+                .padding(.horizontal, zoomManager.scaled(12))
+                .padding(.bottom, zoomManager.scaled(6))
 
             List(selection: $selectedStudentId) {
                 Section {
@@ -92,7 +92,7 @@ struct StudentOverviewBoard: View {
                     Button {
                         showingManageGroups = true
                     } label: {
-                        HStack(spacing: 10) {
+                        HStack(spacing: zoomManager.scaled(10)) {
                             Image(systemName: "folder.badge.gearshape")
                             Text("Manage Groups")
                             Spacer()
@@ -101,14 +101,14 @@ struct StudentOverviewBoard: View {
                                 .foregroundColor(.secondary)
                         }
                         .foregroundColor(.primary)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, zoomManager.scaled(6))
                     }
                     .buttonStyle(.plain)
 
                     Button {
                         showingManageDomains = true
                     } label: {
-                        HStack(spacing: 10) {
+                        HStack(spacing: zoomManager.scaled(10)) {
                             Image(systemName: "tag")
                             Text("Manage Domains")
                             Spacer()
@@ -117,7 +117,7 @@ struct StudentOverviewBoard: View {
                                 .foregroundColor(.secondary)
                         }
                         .foregroundColor(.primary)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, zoomManager.scaled(6))
                     }
                     .buttonStyle(.plain)
                 } header: {
@@ -221,8 +221,8 @@ struct StudentOverviewBoard: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: zoomManager.scaled(12)) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text("Students")
                     .font(.title2)
                     .fontWeight(.bold)
@@ -244,21 +244,21 @@ struct StudentOverviewBoard: View {
     }
 
     private var sidebarSearchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: zoomManager.scaled(8)) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
 
             TextField("Search students or groups", text: $searchText)
                 .textFieldStyle(.plain)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, zoomManager.scaled(8))
+        .padding(.vertical, zoomManager.scaled(6))
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
         .controlSize(.small)
@@ -267,7 +267,7 @@ struct StudentOverviewBoard: View {
     private func studentRow(_ student: Student) -> some View {
         let isEditing = editingStudentId == student.id
 
-        return HStack(spacing: 10) {
+        return HStack(spacing: zoomManager.scaled(10)) {
             ZStack {
                 Circle()
                     .fill(
@@ -277,14 +277,14 @@ struct StudentOverviewBoard: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 28, height: 28)
+                .frame(width: zoomManager.scaled(28), height: zoomManager.scaled(28))
 
-                Text(student.name.prefix(1).uppercased())
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
+            Text(student.name.prefix(1).uppercased())
+                .font(zoomManager.scaledFont(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
 
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 if isEditing {
                     TextField("", text: $editingStudentName)
                         .textFieldStyle(.plain)
@@ -314,13 +314,17 @@ struct StudentOverviewBoard: View {
                         .font(.body)
                         .foregroundColor(.primary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(student.name)
                 }
 
-                HStack(spacing: 4) {
+                HStack(spacing: zoomManager.scaled(4)) {
                     Text(student.group?.name ?? "Ungrouped")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(student.group?.name ?? "Ungrouped")
 
                     Text("•")
                         .font(.caption2)
@@ -329,12 +333,16 @@ struct StudentOverviewBoard: View {
                     Text(student.domain?.name ?? "No Domain")
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(student.domain?.name ?? "No Domain")
                 }
             }
+            .layoutPriority(1)
 
             Spacer()
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, zoomManager.scaled(6))
         .contentShape(Rectangle())
         .onTapGesture {
             if isEditing == false {
@@ -347,36 +355,43 @@ struct StudentOverviewBoard: View {
         Button {
             selectedStudentId = nil
         } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: zoomManager.scaled(12)) {
+                VStack(alignment: .leading, spacing: zoomManager.scaled(4)) {
                     Text("Overall")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
                     Text("\(cohortOverall)%")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(zoomManager.scaledFont(size: 22, weight: .bold, design: .rounded))
                         .foregroundColor(.accentColor)
                 }
 
                 Spacer()
 
                 CircularProgressView(progress: Double(cohortOverall) / 100.0)
-                    .frame(width: 34, height: 34)
+                    .frame(width: zoomManager.scaled(34), height: zoomManager.scaled(34))
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 10)
+            .padding(.vertical, zoomManager.scaled(10))
+            .padding(.horizontal, zoomManager.scaled(10))
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
         .help("Show cohort overview")
-        .listRowInsets(EdgeInsets(top: 8, leading: 10, bottom: 6, trailing: 10))
+        .listRowInsets(
+            EdgeInsets(
+                top: zoomManager.scaled(8),
+                leading: zoomManager.scaled(10),
+                bottom: zoomManager.scaled(6),
+                trailing: zoomManager.scaled(10)
+            )
+        )
     }
 
     private func cohortCategoryRow(_ category: LearningObjective) -> some View {
@@ -386,15 +401,15 @@ struct StudentOverviewBoard: View {
             allObjectives: allObjectives
         )
 
-        return HStack(spacing: 10) {
+        return HStack(spacing: zoomManager.scaled(10)) {
             Text(category.code)
                 .font(.system(.caption, design: .rounded))
                 .fontWeight(.bold)
                 .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, zoomManager.scaled(8))
+                .padding(.vertical, zoomManager.scaled(4))
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                         .fill(categoryColor(for: category.code))
                 )
 
@@ -402,6 +417,9 @@ struct StudentOverviewBoard: View {
                 .font(.caption)
                 .foregroundColor(.primary)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .help(categoryDisplayTitle(for: category))
+                .layoutPriority(1)
                 .contextMenu {
                     Button("Edit Title...") {
                         editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
@@ -414,13 +432,20 @@ struct StudentOverviewBoard: View {
                 .font(.system(.caption, design: .monospaced))
                 .foregroundColor(.secondary)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .padding(.vertical, zoomManager.scaled(8))
+        .padding(.horizontal, zoomManager.scaled(10))
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                 .fill(categoryColor(for: category.code).opacity(0.10))
         )
-        .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
+        .listRowInsets(
+            EdgeInsets(
+                top: zoomManager.scaled(4),
+                leading: zoomManager.scaled(10),
+                bottom: zoomManager.scaled(4),
+                trailing: zoomManager.scaled(10)
+            )
+        )
     }
 
     private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {

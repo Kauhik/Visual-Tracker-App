@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ManageStudentsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ZoomManager.self) private var zoomManager
 
     let onAddSingle: (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void
 
@@ -11,7 +12,7 @@ struct ManageStudentsSheet: View {
     @State private var showingCSVImportSheet: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             HStack {
                 Text("Manage Students")
                     .font(.title2)
@@ -27,7 +28,7 @@ struct ManageStudentsSheet: View {
                 .font(.callout)
                 .foregroundColor(.secondary)
 
-            VStack(spacing: 12) {
+            VStack(spacing: zoomManager.scaled(12)) {
                 optionRow(
                     title: "Add Single Student",
                     subtitle: "Use the existing add-student form",
@@ -45,8 +46,8 @@ struct ManageStudentsSheet: View {
 
             Spacer()
         }
-        .padding(20)
-        .frame(width: 520, height: 360)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(520), height: zoomManager.scaled(360))
         .sheet(isPresented: $showingAddSingleSheet) {
             AddStudentSheet { name, group, session, domain, customProperties in
                 onAddSingle(name, group, session, domain, customProperties)
@@ -64,17 +65,17 @@ struct ManageStudentsSheet: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: zoomManager.scaled(12)) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(zoomManager.scaledFont(size: 20, weight: .semibold))
                     .foregroundColor(.accentColor)
-                    .frame(width: 36, height: 36)
+                    .frame(width: zoomManager.scaled(36), height: zoomManager.scaled(36))
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                             .fill(Color.accentColor.opacity(0.12))
                     )
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                     Text(title)
                         .font(.headline)
                         .foregroundColor(.primary)
@@ -90,13 +91,13 @@ struct ManageStudentsSheet: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .padding(12)
+            .padding(zoomManager.scaled(12))
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }
@@ -107,6 +108,7 @@ struct ManageStudentsSheet: View {
 struct StudentCSVImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     @State private var showingFileImporter: Bool = false
     @State private var isDropTargeted: Bool = false
@@ -129,11 +131,13 @@ struct StudentCSVImportSheet: View {
     @State private var showingSummary: Bool = false
     @State private var summaryMessage: String = ""
 
-    private let previewColumns: [GridItem] = [
-        GridItem(.flexible(minimum: 180), alignment: .leading),
-        GridItem(.flexible(minimum: 180), alignment: .leading),
-        GridItem(.flexible(minimum: 140), alignment: .leading)
-    ]
+    private var previewColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: zoomManager.scaled(180)), alignment: .leading),
+            GridItem(.flexible(minimum: zoomManager.scaled(180)), alignment: .leading),
+            GridItem(.flexible(minimum: zoomManager.scaled(140)), alignment: .leading)
+        ]
+    }
 
     private var hasCandidates: Bool {
         !importCandidates.isEmpty
@@ -205,8 +209,8 @@ struct StudentCSVImportSheet: View {
                 .disabled(!hasCandidates || isImporting)
             }
         }
-        .padding(20)
-        .frame(width: 760, height: 640)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(760), height: zoomManager.scaled(640))
         .fileImporter(
             isPresented: $showingFileImporter,
             allowedContentTypes: [.commaSeparatedText, .plainText],
@@ -232,19 +236,19 @@ struct StudentCSVImportSheet: View {
 
     private var dropZone: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                 .fill(Color(nsColor: .controlBackgroundColor))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(14))
                         .stroke(
                             isDropTargeted ? Color.accentColor : Color.primary.opacity(0.12),
-                            style: StrokeStyle(lineWidth: 2, dash: [6])
+                            style: StrokeStyle(lineWidth: zoomManager.scaled(2), dash: [zoomManager.scaled(6)])
                         )
                 )
 
-            VStack(spacing: 8) {
+            VStack(spacing: zoomManager.scaled(8)) {
                 Image(systemName: "arrow.down.doc")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(zoomManager.scaledFont(size: 30, weight: .semibold))
                     .foregroundColor(.accentColor)
 
                 Text("Drag & drop your CSV here")
@@ -254,9 +258,9 @@ struct StudentCSVImportSheet: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .padding(12)
+            .padding(zoomManager.scaled(12))
         }
-        .frame(height: 140)
+        .frame(height: zoomManager.scaled(140))
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             guard let provider = providers.first else { return false }
             let identifier = UTType.fileURL.identifier
@@ -272,7 +276,7 @@ struct StudentCSVImportSheet: View {
     }
 
     private var previewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(8)) {
             Text("Preview")
                 .font(.headline)
 
@@ -282,11 +286,11 @@ struct StudentCSVImportSheet: View {
                     systemImage: "doc.text",
                     description: Text("Select a CSV file to preview the first 10 rows.")
                 )
-                .frame(maxWidth: .infinity, minHeight: 180)
+                .frame(maxWidth: .infinity, minHeight: zoomManager.scaled(180))
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: zoomManager.scaled(8)) {
                     ScrollView {
-                        LazyVGrid(columns: previewColumns, alignment: .leading, spacing: 8) {
+                        LazyVGrid(columns: previewColumns, alignment: .leading, spacing: zoomManager.scaled(8)) {
                             Group {
                                 Text("Full Name")
                                 Text("Expertise Check")
@@ -306,7 +310,7 @@ struct StudentCSVImportSheet: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: zoomManager.scaled(220))
 
                     if previewRows.count > 10 {
                         Text("Showing first 10 of \(previewRows.count) rows.")
@@ -315,13 +319,13 @@ struct StudentCSVImportSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .padding(12)
+                .padding(zoomManager.scaled(12))
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                         .fill(Color(nsColor: .controlBackgroundColor))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                         .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                 )
             }
@@ -329,8 +333,8 @@ struct StudentCSVImportSheet: View {
     }
 
     private var countsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(8)) {
+            HStack(spacing: zoomManager.scaled(12)) {
                 ImportStatView(title: "Total rows", value: "\(totalRows)")
                 ImportStatView(title: "Valid rows", value: "\(validRows)")
                 ImportStatView(title: "Skipped rows", value: "\(skippedRows)")
@@ -582,9 +586,10 @@ struct StudentCSVImportSheet: View {
 private struct ImportStatView: View {
     let title: String
     let value: String
+    @Environment(ZoomManager.self) private var zoomManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(4)) {
             Text(title)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -593,14 +598,14 @@ private struct ImportStatView: View {
                 .font(.title3)
                 .fontWeight(.semibold)
         }
-        .padding(12)
+        .padding(zoomManager.scaled(12))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
     }

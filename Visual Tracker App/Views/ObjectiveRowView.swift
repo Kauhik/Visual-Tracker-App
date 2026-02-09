@@ -7,6 +7,7 @@ struct ObjectiveRowView: View {
     let indentLevel: Int
 
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
     @State private var showingEditor: Bool = false
 
     private var progress: ObjectiveProgress? {
@@ -92,7 +93,7 @@ struct ObjectiveRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: zoomManager.scaled(10)) {
             if indentLevel > 0 {
                 Text(indentString)
                     .font(.system(.body, design: .monospaced))
@@ -103,12 +104,15 @@ struct ObjectiveRowView: View {
                 .font(.system(.body, design: .monospaced))
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
-                .frame(minWidth: 54, alignment: .leading)
+                .frame(minWidth: zoomManager.scaled(54), alignment: .leading)
 
             Text(objective.title)
                 .font(.body)
                 .foregroundColor(.primary)
-                .lineLimit(2)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(objective.title)
+                .layoutPriority(1)
 
             Spacer()
 
@@ -119,21 +123,21 @@ struct ObjectiveRowView: View {
                 Text("\(completionPercentage)%")
                     .font(.system(.body, design: .monospaced))
                     .foregroundColor(.secondary)
-                    .frame(minWidth: 48, alignment: .trailing)
+                    .frame(minWidth: zoomManager.scaled(48), alignment: .trailing)
             }
 
             if hasChildren == false {
                 progressPill
             }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
+        .padding(.vertical, zoomManager.scaled(6))
+        .padding(.horizontal, zoomManager.scaled(10))
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                 .fill(indentLevel == 0 ? Color.accentColor.opacity(0.10) : Color.clear)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                 .stroke(Color.primary.opacity(indentLevel == 0 ? 0.08 : 0.0), lineWidth: 1)
         )
         .contextMenu {
@@ -153,7 +157,7 @@ struct ObjectiveRowView: View {
         Button {
             showingEditor = true
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: zoomManager.scaled(6)) {
                 Text(status.rawValue)
                     .font(.caption)
                     .fontWeight(.semibold)
@@ -163,8 +167,8 @@ struct ObjectiveRowView: View {
                     .fontWeight(.semibold)
                     .opacity(0.9)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, zoomManager.scaled(10))
+            .padding(.vertical, zoomManager.scaled(6))
             .background(
                 Capsule()
                     .fill(statusColor.opacity(0.16))

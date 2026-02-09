@@ -3,6 +3,7 @@ import SwiftUI
 struct ManageGroupsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     private var groups: [CohortGroup] { store.groups }
     private var students: [Student] { store.students }
@@ -17,7 +18,7 @@ struct ManageGroupsSheet: View {
     @State private var groupPendingDelete: CohortGroup?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             HStack {
                 Text("Manage Groups")
                     .font(.title2)
@@ -62,8 +63,8 @@ struct ManageGroupsSheet: View {
                 .listStyle(.inset)
             }
         }
-        .padding(20)
-        .frame(width: 560, height: 440)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(560), height: zoomManager.scaled(440))
         .sheet(isPresented: $showingRenameSheet) {
             if let group = groupPendingRename {
                 RenameGroupSheet(group: group)
@@ -96,11 +97,11 @@ struct ManageGroupsSheet: View {
     }
 
     private var addGroupRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
             Text("Create Group")
                 .font(.headline)
 
-            HStack(spacing: 10) {
+            HStack(spacing: zoomManager.scaled(10)) {
                 TextField("Group Name", text: $newGroupName)
 
                 Picker("Colour", selection: $newGroupColor) {
@@ -108,7 +109,7 @@ struct ManageGroupsSheet: View {
                         Text(preset.title).tag(preset)
                     }
                 }
-                .frame(width: 160)
+                .frame(width: zoomManager.scaled(160))
 
                 Button("Add") { addGroup() }
                     .buttonStyle(.borderedProminent)
@@ -122,14 +123,17 @@ struct ManageGroupsSheet: View {
         let average = ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
         let badgeColor = Color(hex: group.colorHex) ?? Color.secondary.opacity(0.35)
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: zoomManager.scaled(12)) {
             Circle()
                 .fill(badgeColor)
-                .frame(width: 10, height: 10)
+                .frame(width: zoomManager.scaled(10), height: zoomManager.scaled(10))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text(group.name)
                     .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(group.name)
 
                 Text("\(count) student\(count == 1 ? "" : "s")")
                     .font(.caption)
@@ -138,7 +142,7 @@ struct ManageGroupsSheet: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: zoomManager.scaled(2)) {
                 Text("\(average)%")
                     .font(.system(.callout, design: .rounded))
                     .fontWeight(.semibold)
@@ -148,7 +152,7 @@ struct ManageGroupsSheet: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, zoomManager.scaled(4))
     }
 
     private func addGroup() {

@@ -3,6 +3,7 @@ import SwiftUI
 struct ManageDomainsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     private var domains: [Domain] { store.domains }
     private var students: [Student] { store.students }
@@ -20,7 +21,7 @@ struct ManageDomainsSheet: View {
     @State private var errorMessage: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             HStack {
                 Text("Manage Domains")
                     .font(.title2)
@@ -65,8 +66,8 @@ struct ManageDomainsSheet: View {
                 .listStyle(.inset)
             }
         }
-        .padding(20)
-        .frame(width: 560, height: 440)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(560), height: zoomManager.scaled(440))
         .sheet(isPresented: $showingRenameSheet) {
             if let domain = domainPendingRename {
                 RenameDomainSheet(domain: domain)
@@ -104,11 +105,11 @@ struct ManageDomainsSheet: View {
     }
 
     private var addDomainRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
             Text("Create Domain")
                 .font(.headline)
 
-            HStack(spacing: 10) {
+            HStack(spacing: zoomManager.scaled(10)) {
                 TextField("Domain Name", text: $newDomainName)
 
                 Picker("Colour", selection: $newDomainColor) {
@@ -116,7 +117,7 @@ struct ManageDomainsSheet: View {
                         Text(preset.title).tag(preset)
                     }
                 }
-                .frame(width: 160)
+                .frame(width: zoomManager.scaled(160))
 
                 Button("Add") { addDomain() }
                     .buttonStyle(.borderedProminent)
@@ -130,14 +131,17 @@ struct ManageDomainsSheet: View {
         let average = domainAverage(domain: domain)
         let badgeColor = Color(hex: domain.colorHex) ?? Color.secondary.opacity(0.35)
 
-        return HStack(spacing: 12) {
+        return HStack(spacing: zoomManager.scaled(12)) {
             Circle()
                 .fill(badgeColor)
-                .frame(width: 10, height: 10)
+                .frame(width: zoomManager.scaled(10), height: zoomManager.scaled(10))
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text(domain.name)
                     .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(domain.name)
 
                 Text("\(count) student\(count == 1 ? "" : "s")")
                     .font(.caption)
@@ -146,7 +150,7 @@ struct ManageDomainsSheet: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: zoomManager.scaled(2)) {
                 Text("\(average)%")
                     .font(.system(.callout, design: .rounded))
                     .fontWeight(.semibold)
@@ -156,7 +160,7 @@ struct ManageDomainsSheet: View {
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, zoomManager.scaled(4))
     }
 
     private func addDomain() {

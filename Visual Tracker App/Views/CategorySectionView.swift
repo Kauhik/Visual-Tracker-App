@@ -6,6 +6,7 @@ struct CategorySectionView: View {
     let allObjectives: [LearningObjective]
 
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
@@ -69,27 +70,30 @@ struct CategorySectionView: View {
                     isExpanded.toggle()
                 }
             }) {
-                HStack(spacing: 12) {
+                HStack(spacing: zoomManager.scaled(12)) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .frame(width: 16)
+                        .frame(width: zoomManager.scaled(16))
 
                     Text(categoryObjective.code)
                         .font(.system(.headline, design: .rounded))
                         .fontWeight(.bold)
                         .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, zoomManager.scaled(10))
+                        .padding(.vertical, zoomManager.scaled(4))
                         .background(
-                            RoundedRectangle(cornerRadius: 6)
+                            RoundedRectangle(cornerRadius: zoomManager.scaled(6))
                                 .fill(categoryColor)
                         )
 
                     Text(categoryDisplayTitle(for: categoryObjective))
                         .font(.headline)
                         .foregroundColor(.primary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(categoryDisplayTitle(for: categoryObjective))
+                        .layoutPriority(1)
                         .contextMenu {
                             Button("Edit Title...") {
                                 editingTarget = CategoryEditTarget(
@@ -101,7 +105,7 @@ struct CategorySectionView: View {
 
                     Spacer()
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: zoomManager.scaled(8)) {
                         Text(aggregateStatus.indicator)
                             .font(.title2)
 
@@ -110,10 +114,10 @@ struct CategorySectionView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
+                .padding(.vertical, zoomManager.scaled(12))
+                .padding(.horizontal, zoomManager.scaled(16))
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                         .fill(categoryColor.opacity(0.1))
                 )
             }
@@ -125,8 +129,8 @@ struct CategorySectionView: View {
                     Text(formula)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
+                        .padding(.horizontal, zoomManager.scaled(16))
+                        .padding(.top, zoomManager.scaled(4))
                 }
             }
 
@@ -141,9 +145,9 @@ struct CategorySectionView: View {
                         )
                     }
                 }
-                .padding(.leading, 28)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.leading, zoomManager.scaled(28))
+                .padding(.top, zoomManager.scaled(8))
+                .padding(.bottom, zoomManager.scaled(12))
             }
         }
         .sheet(item: $editingTarget) { target in

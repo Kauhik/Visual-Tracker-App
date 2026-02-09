@@ -12,6 +12,8 @@ struct ObjectiveTreeView: View {
     let student: Student
     let allObjectives: [LearningObjective]
     let startIndentLevel: Int
+
+    @Environment(ZoomManager.self) private var zoomManager
     
     private var childObjectives: [LearningObjective] {
         return allObjectives
@@ -20,7 +22,7 @@ struct ObjectiveTreeView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
             // Display the root objective
             ObjectiveRowView(
                 objective: rootObjective,

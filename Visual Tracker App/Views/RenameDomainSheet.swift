@@ -3,6 +3,7 @@ import SwiftUI
 struct RenameDomainSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: CloudKitStore
+    @Environment(ZoomManager.self) private var zoomManager
 
     let domain: Domain
 
@@ -15,7 +16,7 @@ struct RenameDomainSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             Text("Rename Domain")
                 .font(.title2)
                 .fontWeight(.semibold)
@@ -39,8 +40,8 @@ struct RenameDomainSheet: View {
                 .disabled(trimmed.isEmpty)
             }
         }
-        .padding(20)
-        .frame(width: 420)
+        .padding(zoomManager.scaled(20))
+        .frame(width: zoomManager.scaled(420))
         .alert("Rename Failed", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
         } message: {

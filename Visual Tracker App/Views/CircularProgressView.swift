@@ -2,11 +2,12 @@ import SwiftUI
 
 struct CircularProgressView: View {
     let progress: Double
+    @Environment(ZoomManager.self) private var zoomManager
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.gray.opacity(0.2), lineWidth: 6)
+                .stroke(Color.gray.opacity(0.2), lineWidth: zoomManager.scaled(6))
 
             Circle()
                 .trim(from: 0, to: max(0, min(1, progress)))
@@ -16,7 +17,7 @@ struct CircularProgressView: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                    style: StrokeStyle(lineWidth: zoomManager.scaled(6), lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.3), value: progress)
