@@ -167,6 +167,16 @@ struct ManageSuccessCriteriaSheet: View {
                 Text("\(childrenCount) milestone\(childrenCount == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if store.isPendingCreate(objective: objective) {
+                    HStack(spacing: zoomManager.scaled(4)) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Saving...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             Spacer()

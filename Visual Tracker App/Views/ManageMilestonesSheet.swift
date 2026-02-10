@@ -204,6 +204,16 @@ struct ManageMilestonesSheet: View {
                 Text(parentLabel(for: objective))
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if store.isPendingCreate(objective: objective) {
+                    HStack(spacing: zoomManager.scaled(4)) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Saving...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             Spacer()
@@ -407,7 +417,12 @@ struct ManageMilestonesSheet: View {
     }
 
     private func milestonesForDirectParent(ofParent parent: LearningObjective) -> [LearningObjective] {
-        milestones.filter { $0.isChild(of: parent) }
+        milestones.filter { objective in
+            if let parentId = objective.parentId {
+                return parentId == parent.id
+            }
+            return objective.parentCode == parent.code
+        }
             .sorted {
                 if $0.sortOrder != $1.sortOrder {
                     return $0.sortOrder < $1.sortOrder

@@ -1,0 +1,152 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "CloudKit Error",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 168
+        }
+      },
+      {
+        "comment": "",
+        "key": "iCloud Sign-In Required",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 173
+        }
+      },
+      {
+        "comment": "",
+        "key": "Students",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 48
+        }
+      },
+      {
+        "comment": "",
+        "key": "Visual Tracker",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 64
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a student to start tracking progress.",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 55
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Students",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 53
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset Data",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 73
+        }
+      },
+      {
+        "comment": "",
+        "key": "Resetting...",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 98
+        }
+      },
+      {
+        "comment": "",
+        "key": "Loading Cloud Data…",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 117
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open iCloud Settings",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 147
+        }
+      },
+      {
+        "comment": "",
+        "key": "Retry",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 152
+        }
+      },
+      {
+        "comment": "",
+        "key": "Read-only mode",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 137
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sign in to iCloud to enable edits and syncing.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 140
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 169
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open iCloud Settings",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 174
+        }
+      },
+      {
+        "comment": "",
+        "key": "Retry",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 177
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 180
+        }
+      },
+      {
+        "comment": "",
+        "key": "To enable edits and CloudKit access, sign in to iCloud on this Mac.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 182
+        }
+      }
+    ]
+  },
+  "version": 1
+}

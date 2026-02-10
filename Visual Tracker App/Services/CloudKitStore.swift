@@ -42,6 +42,14 @@ final class CloudKitStore: ObservableObject {
     private var progressRecordNameByID: [UUID: String] = [:]
     private var customPropertyRecordNameByID: [UUID: String] = [:]
     private var allLearningObjectives: [LearningObjective] = []
+    private var pendingGroupCreateIDs: Set<UUID> = []
+    private var pendingDomainCreateIDs: Set<UUID> = []
+    private var pendingLearningObjectiveCreateIDs: Set<UUID> = []
+    private var pendingCategoryLabelCreateKeys: Set<String> = []
+    private var unconfirmedGroupRecordNames: Set<String> = []
+    private var unconfirmedDomainRecordNames: Set<String> = []
+    private var unconfirmedLearningObjectiveRecordNames: Set<String> = []
+    private var unconfirmedCategoryLabelRecordNames: Set<String> = []
     private var objectiveRefMigrationRecordNames: Set<String> = []
     private var isSeedingLearningObjectives: Bool = false
     private var isMigratingLegacyMemberships: Bool = false
@@ -101,6 +109,14 @@ final class CloudKitStore: ObservableObject {
         membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
         customPropertyRecordNameByID.removeAll()
+        pendingGroupCreateIDs.removeAll()
+        pendingDomainCreateIDs.removeAll()
+        pendingLearningObjectiveCreateIDs.removeAll()
+        pendingCategoryLabelCreateKeys.removeAll()
+        unconfirmedGroupRecordNames.removeAll()
+        unconfirmedDomainRecordNames.removeAll()
+        unconfirmedLearningObjectiveRecordNames.removeAll()
+        unconfirmedCategoryLabelRecordNames.removeAll()
 
         do {
             let status = try await service.accountStatus()
@@ -164,9 +180,9 @@ final class CloudKitStore: ObservableObject {
                 mapMembership(from: record, studentMap: studentMap, groupMap: groupMap)
             }
 
-            groups = mappedGroups.sorted { $0.name < $1.name }
-            domains = mappedDomains.sorted { $0.name < $1.name }
-            categoryLabels = mappedLabels.sorted { $0.key < $1.key }
+            mergeFetchedGroups(mappedGroups)
+            mergeFetchedDomains(mappedDomains)
+            mergeFetchedCategoryLabels(mappedLabels)
             memberships = uniqueMemberships(mappedMemberships)
             students = mappedStudents.sorted { $0.createdAt < $1.createdAt }
             if mappedLearningObjectives.isEmpty {
@@ -208,9 +224,11 @@ final class CloudKitStore: ObservableObject {
         let group = CohortGroup(name: name, colorHex: colorHex)
         groups.append(group)
         groups.sort { $0.name < $1.name }
+        pendingGroupCreateIDs.insert(group.id)
 
         let recordID = CKRecord.ID(recordName: group.id.uuidString)
         groupRecordNameByID[group.id] = recordID.recordName
+        unconfirmedGroupRecordNames.insert(recordID.recordName)
 
         let record = CKRecord(recordType: RecordType.cohortGroup, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
@@ -221,8 +239,13 @@ final class CloudKitStore: ObservableObject {
         do {
             let saved = try await service.save(record: record)
             groupRecordNameByID[group.id] = saved.recordID.recordName
+            pendingGroupCreateIDs.remove(group.id)
+            unconfirmedGroupRecordNames.remove(recordID.recordName)
+            unconfirmedGroupRecordNames.insert(saved.recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
+            pendingGroupCreateIDs.remove(group.id)
+            unconfirmedGroupRecordNames.remove(recordID.recordName)
             lastErrorMessage = "Failed to save group: \(error.localizedDescription)"
         }
     }
@@ -282,9 +305,11 @@ final class CloudKitStore: ObservableObject {
         let domain = Domain(name: name, colorHex: colorHex)
         domains.append(domain)
         domains.sort { $0.name < $1.name }
+        pendingDomainCreateIDs.insert(domain.id)
 
         let recordID = CKRecord.ID(recordName: domain.id.uuidString)
         domainRecordNameByID[domain.id] = recordID.recordName
+        unconfirmedDomainRecordNames.insert(recordID.recordName)
 
         let record = CKRecord(recordType: RecordType.domain, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
@@ -295,8 +320,15 @@ final class CloudKitStore: ObservableObject {
         do {
             let saved = try await service.save(record: record)
             domainRecordNameByID[domain.id] = saved.recordID.recordName
+            pendingDomainCreateIDs.remove(domain.id)
+            unconfirmedDomainRecordNames.remove(recordID.recordName)
+            unconfirmedDomainRecordNames.insert(saved.recordID.recordName)
+            syncCoordinator?.noteLocalWrite()
         } catch {
+            pendingDomainCreateIDs.remove(domain.id)
+            unconfirmedDomainRecordNames.remove(recordID.recordName)
             domains.removeAll { $0.id == domain.id }
+            domainRecordNameByID.removeValue(forKey: domain.id)
             lastErrorMessage = "Failed to add domain: \(error.localizedDescription)"
         }
     }
@@ -411,7 +443,19 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await saveStudentRecord(student)
-            try await setGroupsInternal(for: student, groups: group.map { [$0] } ?? [], updateLegacyGroupField: true)
+            if let group {
+                try await setGroupsInternal(for: student, groups: [group], updateLegacyGroupField: true)
+            } else {
+                let existingExplicitGroups = explicitGroups(for: student)
+                if existingExplicitGroups.count > 1 {
+                    // The edit sheet is still single-group. Preserve explicit many-to-many memberships
+                    // when no group is selected to avoid accidental data loss.
+                    refreshLegacyGroupConvenience(for: student)
+                    try await saveStudentRecord(student)
+                } else {
+                    try await setGroupsInternal(for: student, groups: [], updateLegacyGroupField: true)
+                }
+            }
             try await replaceCustomProperties(for: student, rows: customProperties)
         } catch {
             lastErrorMessage = "Failed to update student: \(error.localizedDescription)"
@@ -553,11 +597,17 @@ final class CloudKitStore: ObservableObject {
 
         allLearningObjectives.append(objective)
         setLearningObjectives(allLearningObjectives)
+        pendingLearningObjectiveCreateIDs.insert(objective.id)
+        let localRecordName = objective.id.uuidString
+        unconfirmedLearningObjectiveRecordNames.insert(localRecordName)
 
         do {
             try await saveLearningObjectiveRecord(objective)
+            unconfirmedLearningObjectiveRecordNames.remove(localRecordName)
             return objective
         } catch {
+            pendingLearningObjectiveCreateIDs.remove(objective.id)
+            unconfirmedLearningObjectiveRecordNames.remove(localRecordName)
             allLearningObjectives.removeAll { $0.id == objective.id }
             setLearningObjectives(allLearningObjectives)
             lastErrorMessage = "Failed to create learning objective: \(error.localizedDescription)"
@@ -638,16 +688,23 @@ final class CloudKitStore: ObservableObject {
         }
 
         let label: CategoryLabel
+        let isNewLabel: Bool
         if let existing = categoryLabels.first(where: { $0.key == code }) {
             label = existing
+            isNewLabel = false
             label.title = title
         } else {
             label = CategoryLabel(code: code, title: title)
+            isNewLabel = true
             categoryLabels.append(label)
+            pendingCategoryLabelCreateKeys.insert(code)
         }
         categoryLabels.sort { $0.key < $1.key }
 
         let recordID = CKRecord.ID(recordName: code)
+        if isNewLabel {
+            unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
+        }
         let record = CKRecord(recordType: RecordType.categoryLabel, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.key] = label.key
@@ -657,7 +714,12 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await service.save(record: record)
+            pendingCategoryLabelCreateKeys.remove(code)
+            unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
+            syncCoordinator?.noteLocalWrite()
         } catch {
+            pendingCategoryLabelCreateKeys.remove(code)
+            unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
             lastErrorMessage = "Failed to update category label: \(error.localizedDescription)"
         }
     }
@@ -862,6 +924,8 @@ final class CloudKitStore: ObservableObject {
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         groupRecordNameByID[group.id] = saved.recordID.recordName
+        pendingGroupCreateIDs.remove(group.id)
+        unconfirmedGroupRecordNames.insert(saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -875,6 +939,8 @@ final class CloudKitStore: ObservableObject {
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         domainRecordNameByID[domain.id] = saved.recordID.recordName
+        pendingDomainCreateIDs.remove(domain.id)
+        unconfirmedDomainRecordNames.insert(saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -918,6 +984,8 @@ final class CloudKitStore: ObservableObject {
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         learningObjectiveRecordNameByID[objective.id] = saved.recordID.recordName
+        pendingLearningObjectiveCreateIDs.remove(objective.id)
+        unconfirmedLearningObjectiveRecordNames.insert(saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1019,13 +1087,9 @@ final class CloudKitStore: ObservableObject {
         let name = record[Field.name] as? String ?? "Untitled"
         let colorHex = record[Field.colorHex] as? String
         let group = CohortGroup(name: name, colorHex: colorHex)
-
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            group.id = uuid
-            groupRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            groupRecordNameByID[group.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: groupRecordNameByID)
+        group.id = uuid
+        groupRecordNameByID[uuid] = record.recordID.recordName
 
         return group
     }
@@ -1034,13 +1098,9 @@ final class CloudKitStore: ObservableObject {
         let name = record[Field.name] as? String ?? "Untitled"
         let colorHex = record[Field.colorHex] as? String
         let domain = Domain(name: name, colorHex: colorHex)
-
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            domain.id = uuid
-            domainRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            domainRecordNameByID[domain.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
+        domain.id = uuid
+        domainRecordNameByID[uuid] = record.recordID.recordName
 
         return domain
     }
@@ -1076,12 +1136,9 @@ final class CloudKitStore: ObservableObject {
                 isArchived: isArchivedRaw != 0
             )
 
-            if let uuid = UUID(uuidString: record.recordID.recordName) {
-                objective.id = uuid
-                learningObjectiveRecordNameByID[uuid] = record.recordID.recordName
-            } else {
-                learningObjectiveRecordNameByID[objective.id] = record.recordID.recordName
-            }
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: learningObjectiveRecordNameByID)
+            objective.id = uuid
+            learningObjectiveRecordNameByID[uuid] = record.recordID.recordName
 
             objectiveByRecordName[record.recordID.recordName] = objective
             objectiveByCode[objective.code] = objective
@@ -1128,12 +1185,9 @@ final class CloudKitStore: ObservableObject {
             student.createdAt = createdAt
         }
 
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            student.id = uuid
-            studentRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            studentRecordNameByID[student.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: studentRecordNameByID)
+        student.id = uuid
+        studentRecordNameByID[uuid] = record.recordID.recordName
 
         return student
     }
@@ -1157,13 +1211,9 @@ final class CloudKitStore: ObservableObject {
         let createdAt = (record[Field.createdAt] as? Date) ?? Date()
         let updatedAt = (record[Field.updatedAt] as? Date) ?? createdAt
         let membership = StudentGroupMembership(student: student, group: group, createdAt: createdAt, updatedAt: updatedAt)
-
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            membership.id = uuid
-            membershipRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            membershipRecordNameByID[membership.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: membershipRecordNameByID)
+        membership.id = uuid
+        membershipRecordNameByID[uuid] = record.recordID.recordName
 
         return membership
     }
@@ -1197,12 +1247,9 @@ final class CloudKitStore: ObservableObject {
             progress.status = status
         }
 
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            progress.id = uuid
-            progressRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            progressRecordNameByID[progress.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: progressRecordNameByID)
+        progress.id = uuid
+        progressRecordNameByID[uuid] = record.recordID.recordName
 
         return progress
     }
@@ -1216,12 +1263,9 @@ final class CloudKitStore: ObservableObject {
         let property = StudentCustomProperty(key: key, value: value, sortOrder: sortOrder)
         property.student = student
 
-        if let uuid = UUID(uuidString: record.recordID.recordName) {
-            property.id = uuid
-            customPropertyRecordNameByID[uuid] = record.recordID.recordName
-        } else {
-            customPropertyRecordNameByID[property.id] = record.recordID.recordName
-        }
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: customPropertyRecordNameByID)
+        property.id = uuid
+        customPropertyRecordNameByID[uuid] = record.recordID.recordName
 
         return property
     }
@@ -1649,9 +1693,39 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    func isPendingCreate(group: CohortGroup) -> Bool {
+        pendingGroupCreateIDs.contains(group.id)
+    }
+
+    func isPendingCreate(domain: Domain) -> Bool {
+        pendingDomainCreateIDs.contains(domain.id)
+    }
+
+    func isPendingCreate(objective: LearningObjective) -> Bool {
+        pendingLearningObjectiveCreateIDs.contains(objective.id)
+    }
+
+    func isPendingCreate(categoryCode: String) -> Bool {
+        pendingCategoryLabelCreateKeys.contains(categoryCode)
+    }
+
     private func recordID<T>(for item: T, lookup: [UUID: String]) -> CKRecord.ID where T: Identifiable, T.ID == UUID {
         let recordName = lookup[item.id] ?? item.id.uuidString
         return CKRecord.ID(recordName: recordName)
+    }
+
+    private func existingID(forRecordName recordName: String, lookup: [UUID: String]) -> UUID? {
+        lookup.first(where: { $0.value == recordName })?.key
+    }
+
+    private func resolvedStableID(forRecordName recordName: String, lookup: [UUID: String]) -> UUID {
+        if let uuid = UUID(uuidString: recordName) {
+            return uuid
+        }
+        if let existing = existingID(forRecordName: recordName, lookup: lookup) {
+            return existing
+        }
+        return UUID()
     }
 
     private func normalizedDomainName(_ name: String) -> String {
@@ -1668,6 +1742,47 @@ final class CloudKitStore: ObservableObject {
             map[recordName] = item
         }
         return map
+    }
+
+    private func mergeFetchedGroups(_ fetched: [CohortGroup]) {
+        let fetchedByID = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
+        for existing in groups {
+            guard let incoming = fetchedByID[existing.id] else { continue }
+            existing.name = incoming.name
+            existing.colorHex = incoming.colorHex
+        }
+        for incoming in fetched where groups.contains(where: { $0.id == incoming.id }) == false {
+            groups.append(incoming)
+        }
+        groups.removeAll { fetchedByID[$0.id] == nil }
+        groups.sort { $0.name < $1.name }
+    }
+
+    private func mergeFetchedDomains(_ fetched: [Domain]) {
+        let fetchedByID = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
+        for existing in domains {
+            guard let incoming = fetchedByID[existing.id] else { continue }
+            existing.name = incoming.name
+            existing.colorHex = incoming.colorHex
+        }
+        for incoming in fetched where domains.contains(where: { $0.id == incoming.id }) == false {
+            domains.append(incoming)
+        }
+        domains.removeAll { fetchedByID[$0.id] == nil }
+        domains.sort { $0.name < $1.name }
+    }
+
+    private func mergeFetchedCategoryLabels(_ fetched: [CategoryLabel]) {
+        let fetchedByKey = Dictionary(uniqueKeysWithValues: fetched.map { ($0.key, $0) })
+        for existing in categoryLabels {
+            guard let incoming = fetchedByKey[existing.key] else { continue }
+            existing.title = incoming.title
+        }
+        for incoming in fetched where categoryLabels.contains(where: { $0.key == incoming.key }) == false {
+            categoryLabels.append(incoming)
+        }
+        categoryLabels.removeAll { fetchedByKey[$0.key] == nil }
+        categoryLabels.sort { $0.key < $1.key }
     }
 
     // MARK: - Live CloudKit Updates
@@ -1901,12 +2016,14 @@ final class CloudKitStore: ObservableObject {
             let remoteGroupIDs = Set(remoteGroups.map { $0.recordID.recordName })
             let localGroupIDs = Set(groupRecordNameByID.values)
             for recordName in localGroupIDs.subtracting(remoteGroupIDs) {
+                guard unconfirmedGroupRecordNames.contains(recordName) == false else { continue }
                 deleteGroupByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             let remoteDomainIDs = Set(remoteDomains.map { $0.recordID.recordName })
             let localDomainIDs = Set(domainRecordNameByID.values)
             for recordName in localDomainIDs.subtracting(remoteDomainIDs) {
+                guard unconfirmedDomainRecordNames.contains(recordName) == false else { continue }
                 deleteDomainByRecordID(CKRecord.ID(recordName: recordName))
             }
 
@@ -1919,6 +2036,7 @@ final class CloudKitStore: ObservableObject {
             let remoteObjectiveIDs = Set(remoteObjectives.map { $0.recordID.recordName })
             let localObjectiveIDs = Set(learningObjectiveRecordNameByID.values)
             for recordName in localObjectiveIDs.subtracting(remoteObjectiveIDs) {
+                guard unconfirmedLearningObjectiveRecordNames.contains(recordName) == false else { continue }
                 deleteLearningObjectiveByRecordID(CKRecord.ID(recordName: recordName))
             }
 
@@ -1931,6 +2049,7 @@ final class CloudKitStore: ObservableObject {
             let remoteLabelIDs = Set(remoteLabels.map { $0.recordID.recordName })
             let localLabelIDs = Set(categoryLabels.map { $0.key })
             for key in localLabelIDs.subtracting(remoteLabelIDs) {
+                guard unconfirmedCategoryLabelRecordNames.contains(key) == false else { continue }
                 deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
             }
 
@@ -2042,7 +2161,7 @@ final class CloudKitStore: ObservableObject {
         for record in records {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
-            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: groupRecordNameByID)
 
             if let existing = groups.first(where: { $0.id == uuid }) {
                 syncLogger.info("Updating existing group: \(name, privacy: .public)")
@@ -2056,6 +2175,8 @@ final class CloudKitStore: ObservableObject {
             }
 
             groupRecordNameByID[uuid] = record.recordID.recordName
+            pendingGroupCreateIDs.remove(uuid)
+            unconfirmedGroupRecordNames.remove(record.recordID.recordName)
         }
 
         groups.sort { $0.name < $1.name }
@@ -2070,7 +2191,7 @@ final class CloudKitStore: ObservableObject {
         for record in records {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
-            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
 
             if let existing = domains.first(where: { $0.id == uuid }) {
                 syncLogger.info("Updating existing domain: \(name, privacy: .public)")
@@ -2084,6 +2205,8 @@ final class CloudKitStore: ObservableObject {
             }
 
             domainRecordNameByID[uuid] = record.recordID.recordName
+            pendingDomainCreateIDs.remove(uuid)
+            unconfirmedDomainRecordNames.remove(record.recordID.recordName)
         }
 
         domains.sort { $0.name < $1.name }
@@ -2106,6 +2229,8 @@ final class CloudKitStore: ObservableObject {
                 syncLogger.info("Adding new category label: \(code, privacy: .public)")
                 categoryLabels.append(CategoryLabel(code: code, title: title))
             }
+            pendingCategoryLabelCreateKeys.remove(code)
+            unconfirmedCategoryLabelRecordNames.remove(record.recordID.recordName)
         }
 
         categoryLabels.sort { $0.key < $1.key }
@@ -2131,6 +2256,12 @@ final class CloudKitStore: ObservableObject {
         }
         for record in records {
             mergedByRecordName[record.recordID.recordName] = record
+            let objectiveID = resolvedStableID(
+                forRecordName: record.recordID.recordName,
+                lookup: learningObjectiveRecordNameByID
+            )
+            pendingLearningObjectiveCreateIDs.remove(objectiveID)
+            unconfirmedLearningObjectiveRecordNames.remove(record.recordID.recordName)
         }
 
         let remapped = mapLearningObjectives(from: Array(mergedByRecordName.values))
@@ -2180,7 +2311,7 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
 
         for record in records {
-            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: studentRecordNameByID)
 
             let name = record[Field.name] as? String ?? "Unnamed"
             let sessionRaw = record[Field.session] as? String ?? Session.morning.rawValue
@@ -2256,7 +2387,7 @@ final class CloudKitStore: ObservableObject {
             let statusRaw = record[Field.status] as? String
             let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: canonicalValue)
 
-            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: progressRecordNameByID)
             if let duplicate = student.progressRecords.first(where: { existing in
                 guard existing.id != uuid else { return false }
                 if let objectiveId {
@@ -2329,7 +2460,7 @@ final class CloudKitStore: ObservableObject {
                 ?? (record[Field.sortOrder] as? NSNumber)?.intValue
                 ?? 0
 
-            let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: customPropertyRecordNameByID)
 
             if let existing = student.customProperties.first(where: { $0.id == uuid }) {
                 syncLogger.info("Updating custom property: \(key, privacy: .public)")
@@ -2350,11 +2481,13 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func deleteGroupByRecordID(_ recordID: CKRecord.ID) {
-        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: groupRecordNameByID)
         syncLogger.info("Deleting group with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         groups.removeAll { $0.id == uuid }
         groupRecordNameByID.removeValue(forKey: uuid)
+        pendingGroupCreateIDs.remove(uuid)
+        unconfirmedGroupRecordNames.remove(recordID.recordName)
         memberships.removeAll { $0.group?.id == uuid }
         let remainingMembershipIDs = Set(memberships.map(\.id))
         membershipRecordNameByID = membershipRecordNameByID.filter { remainingMembershipIDs.contains($0.key) }
@@ -2362,11 +2495,13 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func deleteDomainByRecordID(_ recordID: CKRecord.ID) {
-        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: domainRecordNameByID)
         syncLogger.info("Deleting domain with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         domains.removeAll { $0.id == uuid }
         domainRecordNameByID.removeValue(forKey: uuid)
+        pendingDomainCreateIDs.remove(uuid)
+        unconfirmedDomainRecordNames.remove(recordID.recordName)
 
         for student in students where student.domain?.id == uuid {
             student.domain = nil
@@ -2391,6 +2526,8 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Deleting category label: \(key, privacy: .public)")
         objectWillChange.send()
         categoryLabels.removeAll { $0.key == key || $0.code == key }
+        pendingCategoryLabelCreateKeys.remove(key)
+        unconfirmedCategoryLabelRecordNames.remove(key)
     }
 
     private func deleteLearningObjectiveByRecordID(_ recordID: CKRecord.ID) {
@@ -2400,6 +2537,8 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         allLearningObjectives.removeAll { $0.id == objectiveID }
         learningObjectiveRecordNameByID.removeValue(forKey: objectiveID)
+        pendingLearningObjectiveCreateIDs.remove(objectiveID)
+        unconfirmedLearningObjectiveRecordNames.remove(recordID.recordName)
         setLearningObjectives(allLearningObjectives)
     }
 

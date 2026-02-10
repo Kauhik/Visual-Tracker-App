@@ -6,7 +6,7 @@
 	<integer>11</integer>
 	<key>logs</key>
 	<dict>
-		<key>85E07A56-72A6-4114-9C5F-5E309A3D4739</key>
+		<key>7BE53307-42EB-4171-BD59-092C7A29AE88</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>85E07A56-72A6-4114-9C5F-5E309A3D4739.xcactivitylog</string>
+			<string>7BE53307-42EB-4171-BD59-092C7A29AE88.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -40,13 +40,13 @@
 			<key>signature</key>
 			<string>Cleaning project Visual Tracker App with scheme Visual Tracker App and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>792384196.19589996</real>
+			<real>792396893.10910702</real>
 			<key>timeStoppedRecording</key>
-			<real>792384196.35662103</real>
+			<real>792396893.28528702</real>
 			<key>title</key>
 			<string>Cleaning project Visual Tracker App with scheme Visual Tracker App and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>85E07A56-72A6-4114-9C5F-5E309A3D4739</string>
+			<string>7BE53307-42EB-4171-BD59-092C7A29AE88</string>
 		</dict>
 	</dict>
 </dict>

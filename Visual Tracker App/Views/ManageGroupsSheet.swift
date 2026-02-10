@@ -147,6 +147,16 @@ struct ManageGroupsSheet: View {
                 Text("\(count) student\(count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if store.isPendingCreate(group: group) {
+                    HStack(spacing: zoomManager.scaled(4)) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Saving...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             Spacer()
