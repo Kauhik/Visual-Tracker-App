@@ -25,7 +25,9 @@ enum ProgressStatus: String, Codable, CaseIterable {
 @Model
 final class ObjectiveProgress {
     @Attribute(.unique) var id: UUID
+    var objectiveId: UUID?
     var objectiveCode: String
+    var value: Int
     var completionPercentage: Int
     var status: ProgressStatus
     var notes: String
@@ -33,13 +35,22 @@ final class ObjectiveProgress {
     
     var student: Student?
     
-    init(objectiveCode: String, completionPercentage: Int = 0, notes: String = "") {
+    init(
+        objectiveCode: String,
+        completionPercentage: Int = 0,
+        notes: String = "",
+        objectiveId: UUID? = nil,
+        value: Int? = nil
+    ) {
+        let canonicalValue = max(0, min(100, value ?? completionPercentage))
         self.id = UUID()
+        self.objectiveId = objectiveId
         self.objectiveCode = objectiveCode
-        self.completionPercentage = max(0, min(100, completionPercentage))
+        self.value = canonicalValue
+        self.completionPercentage = canonicalValue
         self.notes = notes
         self.lastUpdated = Date()
-        self.status = ObjectiveProgress.calculateStatus(from: completionPercentage)
+        self.status = ObjectiveProgress.calculateStatus(from: canonicalValue)
     }
     
     static func calculateStatus(from percentage: Int) -> ProgressStatus {
@@ -51,8 +62,10 @@ final class ObjectiveProgress {
     }
     
     func updateCompletion(_ percentage: Int) {
-        self.completionPercentage = max(0, min(100, percentage))
-        self.status = ObjectiveProgress.calculateStatus(from: self.completionPercentage)
+        let canonicalValue = max(0, min(100, percentage))
+        self.value = canonicalValue
+        self.completionPercentage = canonicalValue
+        self.status = ObjectiveProgress.calculateStatus(from: canonicalValue)
         self.lastUpdated = Date()
     }
 }

@@ -41,7 +41,20 @@ final class Student {
         return progressRecords.first { $0.objectiveCode == objectiveCode }
     }
 
+    func progress(for objective: LearningObjective) -> ObjectiveProgress? {
+        return progressRecords.first { progress in
+            if let objectiveId = progress.objectiveId {
+                return objectiveId == objective.id
+            }
+            return progress.objectiveCode == objective.code
+        }
+    }
+
     func completionPercentage(for objectiveCode: String) -> Int {
-        return progress(for: objectiveCode)?.completionPercentage ?? 0
+        return progress(for: objectiveCode)?.value ?? 0
+    }
+
+    func completionPercentage(for objective: LearningObjective) -> Int {
+        return progress(for: objective)?.value ?? 0
     }
 }

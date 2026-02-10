@@ -15,25 +15,16 @@ struct CategorySectionView: View {
 
     private var childObjectives: [LearningObjective] {
         allObjectives
-            .filter { $0.parentCode == categoryObjective.code }
+            .filter { $0.isChild(of: categoryObjective) && $0.isArchived == false }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var aggregatePercentage: Int {
-        calculateCategoryPercentage(for: categoryObjective)
-    }
-
-    private func calculateCategoryPercentage(for objective: LearningObjective) -> Int {
-        let children = allObjectives.filter { $0.parentCode == objective.code }
-        if children.isEmpty {
-            return student.completionPercentage(for: objective.code)
-        }
-
-        var total = 0
-        for child in children {
-            total += calculateCategoryPercentage(for: child)
-        }
-        return children.count > 0 ? total / children.count : 0
+        ProgressCalculator.objectivePercentage(
+            student: student,
+            objective: categoryObjective,
+            allObjectives: allObjectives
+        )
     }
 
     private var aggregateStatus: ProgressStatus {
@@ -53,9 +44,9 @@ struct CategorySectionView: View {
 
     private var formulaDisplay: String? {
         if categoryObjective.code == "A" {
-            let a1 = student.completionPercentage(for: "A.1")
-            let a2 = student.completionPercentage(for: "A.2")
-            let a3 = student.completionPercentage(for: "A.3")
+            let a1 = objectivePercentage(forCode: "A.1")
+            let a2 = objectivePercentage(forCode: "A.2")
+            let a3 = objectivePercentage(forCode: "A.3")
             let sum = a1 + a2 + a3
             let avg = Double(sum) / 3.0
             return "(\(a1) + \(a2) + \(a3)) / 300% = \(String(format: "%.3f", avg / 100.0 * 100))%"
@@ -159,10 +150,18 @@ struct CategorySectionView: View {
     }
 
     private func categoryDisplayTitle(for objective: LearningObjective) -> String {
-        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+        let canonical = objective.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if canonical.isEmpty, let label = categoryLabels.first(where: { $0.key == objective.code }) {
             return label.title
         }
-        return objective.title
+        return canonical.isEmpty ? objective.code : objective.title
+    }
+
+    private func objectivePercentage(forCode code: String) -> Int {
+        guard let objective = allObjectives.first(where: { $0.code == code }) else {
+            return student.completionPercentage(for: code)
+        }
+        return student.completionPercentage(for: objective)
     }
 
     private struct CategoryEditTarget: Identifiable {

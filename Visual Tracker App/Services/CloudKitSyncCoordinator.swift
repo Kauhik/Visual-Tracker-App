@@ -41,6 +41,8 @@ final class CloudKitSyncCoordinator {
         static let domain = "vt_sub_domain"
         static let student = "vt_sub_student"
         static let categoryLabel = "vt_sub_categoryLabel"
+        static let learningObjective = "vt_sub_learningObjective"
+        static let studentGroupMembership = "vt_sub_studentGroupMembership"
         static let objectiveProgress = "vt_sub_objectiveProgress"
         static let studentCustomProperty = "vt_sub_studentCustomProperty"
     }
@@ -50,6 +52,8 @@ final class CloudKitSyncCoordinator {
         static let cohortGroup = "CohortGroup"
         static let domain = "Domain"
         static let categoryLabel = "CategoryLabel"
+        static let learningObjective = "LearningObjective"
+        static let studentGroupMembership = "StudentGroupMembership"
         static let student = "Student"
         static let studentCustomProperty = "StudentCustomProperty"
         static let objectiveProgress = "ObjectiveProgress"
@@ -60,6 +64,8 @@ final class CloudKitSyncCoordinator {
         SubscriptionID.domain: RecordType.domain,
         SubscriptionID.student: RecordType.student,
         SubscriptionID.categoryLabel: RecordType.categoryLabel,
+        SubscriptionID.learningObjective: RecordType.learningObjective,
+        SubscriptionID.studentGroupMembership: RecordType.studentGroupMembership,
         SubscriptionID.objectiveProgress: RecordType.objectiveProgress,
         SubscriptionID.studentCustomProperty: RecordType.studentCustomProperty
     ]
@@ -261,6 +267,18 @@ final class CloudKitSyncCoordinator {
         if await createQuerySubscriptionIfPossible(
             subscriptionID: SubscriptionID.categoryLabel,
             recordType: RecordType.categoryLabel,
+            predicate: predicate
+        ) { successCount += 1 } else { failureCount += 1 }
+
+        if await createQuerySubscriptionIfPossible(
+            subscriptionID: SubscriptionID.learningObjective,
+            recordType: RecordType.learningObjective,
+            predicate: predicate
+        ) { successCount += 1 } else { failureCount += 1 }
+
+        if await createQuerySubscriptionIfPossible(
+            subscriptionID: SubscriptionID.studentGroupMembership,
+            recordType: RecordType.studentGroupMembership,
             predicate: predicate
         ) { successCount += 1 } else { failureCount += 1 }
         

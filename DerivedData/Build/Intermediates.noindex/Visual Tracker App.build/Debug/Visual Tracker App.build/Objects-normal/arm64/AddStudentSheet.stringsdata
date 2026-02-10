@@ -1,0 +1,120 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/AddStudentSheet.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Validation Error",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 161
+        }
+      },
+      {
+        "comment": "",
+        "key": "Student Name",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Group",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "Session",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 89
+        }
+      },
+      {
+        "comment": "",
+        "key": "Domain",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 95
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ungrouped",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 80
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Domain",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 96
+        }
+      },
+      {
+        "comment": "",
+        "key": "No custom properties",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 108
+        }
+      },
+      {
+        "comment": "",
+        "key": "Key",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "Value",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 118
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Property",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 135
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom Properties",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 138
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 146
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 162
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,23 @@
+{
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/CategorySectionView.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategorySectionView.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategorySectionView.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategorySectionView.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategorySectionView.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategorySectionView.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/CircularProgressView.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CircularProgressView.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CircularProgressView.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CircularProgressView.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CircularProgressView.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CircularProgressView.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/ColorHex.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ColorHex.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ColorHex.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ColorHex.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ColorHex.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ColorHex.swiftdeps"
+  }
+}

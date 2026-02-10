@@ -1,0 +1,144 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/ManageGroupsSheet.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Delete Group",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 74
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create a group to organise students.",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 42
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Groups",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 40
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Groups",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 23
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 29
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 50
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 57
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 81
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld student%@ will become Ungrouped.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 94
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create Group",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Group Name",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "Colour",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld student%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 143
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 151
+        }
+      },
+      {
+        "comment": "",
+        "key": "Group average",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 155
+        }
+      }
+    ]
+  },
+  "version": 1
+}

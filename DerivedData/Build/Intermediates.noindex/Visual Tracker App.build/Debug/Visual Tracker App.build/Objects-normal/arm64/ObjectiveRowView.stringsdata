@@ -1,0 +1,72 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/ObjectiveRowView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 132
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit progress",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 201
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set 0%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 154
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set 25%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set 50%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 156
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set 75%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 157
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set 100%",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 158
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom...",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 160
+        }
+      }
+    ]
+  },
+  "version": 1
+}

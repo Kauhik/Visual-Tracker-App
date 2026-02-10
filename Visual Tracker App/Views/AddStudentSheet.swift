@@ -167,7 +167,7 @@ struct AddStudentSheet: View {
             if let student = studentToEdit {
                 await store.loadCustomPropertiesIfNeeded(for: student)
                 name = student.name
-                selectedGroup = student.group
+                selectedGroup = store.primaryGroup(for: student)
                 selectedSession = student.session
                 selectedDomain = student.domain
                 customPropertyRows = student.customProperties

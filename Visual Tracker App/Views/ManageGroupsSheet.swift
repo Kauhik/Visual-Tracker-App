@@ -90,7 +90,9 @@ struct ManageGroupsSheet: View {
             }
         } message: {
             if let group = groupPendingDelete {
-                let count = students.filter { $0.group?.id == group.id }.count
+                let count = students.filter { student in
+                    store.groups(for: student).contains { $0.id == group.id }
+                }.count
                 Text("\(count) student\(count == 1 ? "" : "s") will become Ungrouped.")
             }
         }
@@ -119,8 +121,15 @@ struct ManageGroupsSheet: View {
     }
 
     private func groupRow(_ group: CohortGroup) -> some View {
-        let count = students.filter { $0.group?.id == group.id }.count
-        let average = ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
+        let count = students.filter { student in
+            store.groups(for: student).contains { $0.id == group.id }
+        }.count
+        let average = ProgressCalculator.groupOverall(
+            group: group,
+            students: students,
+            memberships: store.memberships,
+            allObjectives: allObjectives
+        )
         let badgeColor = Color(hex: group.colorHex) ?? Color.secondary.opacity(0.35)
 
         return HStack(spacing: zoomManager.scaled(12)) {

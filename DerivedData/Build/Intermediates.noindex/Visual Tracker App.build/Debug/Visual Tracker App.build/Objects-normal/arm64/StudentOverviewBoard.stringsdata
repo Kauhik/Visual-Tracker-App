@@ -1,0 +1,200 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/StudentOverviewBoard.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Delete Student",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 181
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename Failed",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 202
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show cohort overview",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 387
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Groups",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 98
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Domains",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cohort Overview",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 125
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Student…",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 135
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 139
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete Student",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 145
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 188
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 194
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete %@? This action cannot be undone.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 199
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 203
+        }
+      },
+      {
+        "comment": "",
+        "key": "Students",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 227
+        }
+      },
+      {
+        "comment": "",
+        "key": "No students yet",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld student%@",
+        "location": {
+          "startingColumn": 61,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Students",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 241
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search students or groups",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 252
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 290
+        }
+      },
+      {
+        "comment": "",
+        "key": "•",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 330
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overall",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 365
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 434
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Title...",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 427
+        }
+      }
+    ]
+  },
+  "version": 1
+}

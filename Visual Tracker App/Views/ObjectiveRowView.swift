@@ -11,21 +11,21 @@ struct ObjectiveRowView: View {
     @State private var showingEditor: Bool = false
 
     private var progress: ObjectiveProgress? {
-        student.progress(for: objective.code)
+        student.progress(for: objective)
     }
 
     private var hasChildren: Bool {
-        allObjectives.contains { $0.parentCode == objective.code }
+        allObjectives.contains { $0.isChild(of: objective) && $0.isArchived == false }
     }
 
     private var childObjectives: [LearningObjective] {
         allObjectives
-            .filter { $0.parentCode == objective.code }
+            .filter { $0.isChild(of: objective) && $0.isArchived == false }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var leafPercentage: Int {
-        progress?.completionPercentage ?? 0
+        progress?.value ?? 0
     }
 
     private var completionPercentage: Int {
@@ -67,9 +67,9 @@ struct ObjectiveRowView: View {
     }
 
     private func getPercentageForObjective(_ obj: LearningObjective) -> Int {
-        let objChildren = allObjectives.filter { $0.parentCode == obj.code }
+        let objChildren = allObjectives.filter { $0.isChild(of: obj) && $0.isArchived == false }
         if objChildren.isEmpty {
-            return student.completionPercentage(for: obj.code)
+            return student.completionPercentage(for: obj)
         }
 
         var total = 0
@@ -194,7 +194,7 @@ struct ObjectiveRowView: View {
 
     private func updateProgress(_ newPercentage: Int) {
         Task {
-            await store.setProgress(student: student, objectiveCode: objective.code, value: newPercentage)
+            await store.setProgress(student: student, objective: objective, value: newPercentage)
         }
     }
 }

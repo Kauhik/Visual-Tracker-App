@@ -1,0 +1,24 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/CategorySectionView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Edit Title...",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 121
+        }
+      }
+    ]
+  },
+  "version": 1
+}

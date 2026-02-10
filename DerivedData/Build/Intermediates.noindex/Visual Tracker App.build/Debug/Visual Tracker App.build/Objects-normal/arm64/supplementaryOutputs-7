@@ -1,0 +1,23 @@
+{
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Services/SeedDataService.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/SeedDataService.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/SeedDataService.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/SeedDataService.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/SeedDataService.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/SeedDataService.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Services/ZoomManager.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ZoomManager.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ZoomManager.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ZoomManager.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ZoomManager.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ZoomManager.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/AddStudentSheet.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/AddStudentSheet.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/AddStudentSheet.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/AddStudentSheet.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/AddStudentSheet.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/AddStudentSheet.swiftdeps"
+  }
+}

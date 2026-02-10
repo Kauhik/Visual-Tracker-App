@@ -22,6 +22,7 @@ final class CloudKitStore: ObservableObject {
     @Published var domains: [Domain] = []
     @Published var categoryLabels: [CategoryLabel] = []
     @Published var learningObjectives: [LearningObjective] = LearningObjectiveCatalog.defaultObjectives()
+    @Published var memberships: [StudentGroupMembership] = []
     @Published var selectedStudentId: UUID?
     @Published var selectedScope: StudentFilterScope = .overall
 
@@ -35,9 +36,15 @@ final class CloudKitStore: ObservableObject {
 
     private var groupRecordNameByID: [UUID: String] = [:]
     private var domainRecordNameByID: [UUID: String] = [:]
+    private var learningObjectiveRecordNameByID: [UUID: String] = [:]
     private var studentRecordNameByID: [UUID: String] = [:]
+    private var membershipRecordNameByID: [UUID: String] = [:]
     private var progressRecordNameByID: [UUID: String] = [:]
     private var customPropertyRecordNameByID: [UUID: String] = [:]
+    private var allLearningObjectives: [LearningObjective] = []
+    private var objectiveRefMigrationRecordNames: Set<String> = []
+    private var isSeedingLearningObjectives: Bool = false
+    private var isMigratingLegacyMemberships: Bool = false
 
     private var syncCoordinator: CloudKitSyncCoordinator?
     private var lastSyncDateDefaultsKey: String { "VisualTrackerApp.lastSyncDate.\(cohortId)" }
@@ -57,6 +64,7 @@ final class CloudKitStore: ObservableObject {
 
     init(service: CloudKitService = CloudKitService(), usePreviewData: Bool = false) {
         self.service = service
+        setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
 
         if usePreviewData {
             let previewGroup = CohortGroup(name: "Preview Group", colorHex: "#3B82F6")
@@ -73,7 +81,7 @@ final class CloudKitStore: ObservableObject {
             categoryLabels = [
                 CategoryLabel(code: "A", title: "Able to apply 100% of core LOs for chosen path")
             ]
-            learningObjectives = LearningObjectiveCatalog.defaultObjectives()
+            setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
             hasLoaded = true
         }
     }
@@ -88,7 +96,9 @@ final class CloudKitStore: ObservableObject {
         lastErrorMessage = nil
         groupRecordNameByID.removeAll()
         domainRecordNameByID.removeAll()
+        learningObjectiveRecordNameByID.removeAll()
         studentRecordNameByID.removeAll()
+        membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
         customPropertyRecordNameByID.removeAll()
 
@@ -122,9 +132,20 @@ final class CloudKitStore: ObservableObject {
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.key, ascending: true)]
             )
+            let learningObjectiveRecords = try await service.queryRecords(
+                ofType: RecordType.learningObjective,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
+                sortDescriptors: [NSSortDescriptor(key: Field.sortOrder, ascending: true)]
+            )
+            let membershipRecords = try await service.queryRecords(
+                ofType: RecordType.studentGroupMembership,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
+                sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
+            )
 
             let mappedGroups = groupRecords.map { mapGroup(from: $0) }
             let mappedDomains = domainRecords.map { mapDomain(from: $0) }
+            let mappedLearningObjectives = mapLearningObjectives(from: learningObjectiveRecords)
 
             let groupMap = dictionaryByRecordName(items: mappedGroups, recordNameLookup: groupRecordNameByID)
             let domainMap = dictionaryByRecordName(items: mappedDomains, recordNameLookup: domainRecordNameByID)
@@ -138,11 +159,22 @@ final class CloudKitStore: ObservableObject {
             let mappedStudents = studentRecords.map { mapStudent(from: $0, groupMap: groupMap, domainMap: domainMap) }
 
             let mappedLabels = labelRecords.map { mapCategoryLabel(from: $0) }
+            let studentMap = dictionaryByRecordName(items: mappedStudents, recordNameLookup: studentRecordNameByID)
+            let mappedMemberships = membershipRecords.compactMap { record in
+                mapMembership(from: record, studentMap: studentMap, groupMap: groupMap)
+            }
 
             groups = mappedGroups.sorted { $0.name < $1.name }
             domains = mappedDomains.sorted { $0.name < $1.name }
             categoryLabels = mappedLabels.sorted { $0.key < $1.key }
+            memberships = uniqueMemberships(mappedMemberships)
             students = mappedStudents.sorted { $0.createdAt < $1.createdAt }
+            if mappedLearningObjectives.isEmpty {
+                setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
+            } else {
+                setLearningObjectives(mappedLearningObjectives)
+            }
+            refreshLegacyGroupConvenience()
 
             progressLoadedStudentIDs.removeAll()
             customPropertiesLoadedStudentIDs.removeAll()
@@ -152,6 +184,11 @@ final class CloudKitStore: ObservableObject {
             hasLoaded = true
 
             startLiveSyncIfNeeded()
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureLearningObjectivesSeededIfNeeded()
+                await self.migrateLegacyGroupMembershipsIfNeeded()
+            }
         } catch {
             let detail = service.describe(error)
             lastErrorMessage = friendlyMessage(for: error, detail: detail)
@@ -211,12 +248,19 @@ final class CloudKitStore: ObservableObject {
         guard await requireWriteAccess() else { return }
         let recordID = recordID(for: group, lookup: groupRecordNameByID)
 
-        let affected = students.filter { $0.group?.id == group.id }
-        affected.forEach { $0.group = nil }
+        let affectedStudentIDs = Set(
+            memberships
+                .filter { $0.group?.id == group.id }
+                .compactMap { $0.student?.id }
+        )
+        let affected = students.filter { affectedStudentIDs.contains($0.id) || $0.group?.id == group.id }
+
         groups.removeAll { $0.id == group.id }
 
         do {
+            try await deleteMemberships(forGroupID: group.id)
             try await service.delete(recordID: recordID)
+            refreshLegacyGroupConvenience()
             for student in affected {
                 try await saveStudentRecord(student)
             }
@@ -339,6 +383,9 @@ final class CloudKitStore: ObservableObject {
             if customProperties.isEmpty == false {
                 try await replaceCustomProperties(for: student, rows: customProperties)
             }
+            if let group {
+                try await setGroupsInternal(for: student, groups: [group], updateLegacyGroupField: false)
+            }
 
             return student
         } catch {
@@ -359,12 +406,12 @@ final class CloudKitStore: ObservableObject {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         student.name = name
-        student.group = group
         student.session = session
         student.domain = domain
 
         do {
             try await saveStudentRecord(student)
+            try await setGroupsInternal(for: student, groups: group.map { [$0] } ?? [], updateLegacyGroupField: true)
             try await replaceCustomProperties(for: student, rows: customProperties)
         } catch {
             lastErrorMessage = "Failed to update student: \(error.localizedDescription)"
@@ -389,13 +436,10 @@ final class CloudKitStore: ObservableObject {
     func moveStudent(_ student: Student, to group: CohortGroup?) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
-        let previousGroup = student.group
-        student.group = group
 
         do {
-            try await saveStudentRecord(student)
+            try await setGroupsInternal(for: student, groups: group.map { [$0] } ?? [], updateLegacyGroupField: true)
         } catch {
-            student.group = previousGroup
             lastErrorMessage = "Failed to move student: \(error.localizedDescription)"
         }
     }
@@ -409,12 +453,179 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await service.delete(recordID: recordID)
+            try await deleteMemberships(forStudentID: student.id)
             try await deleteProgress(for: student)
             try await deleteCustomProperties(for: student)
             syncCoordinator?.noteLocalWrite()
         } catch {
             lastErrorMessage = "Failed to delete student: \(error.localizedDescription)"
             await reloadAllData()
+        }
+    }
+
+    func groups(for student: Student) -> [CohortGroup] {
+        let explicitGroups = memberships.compactMap { membership -> CohortGroup? in
+            guard membership.student?.id == student.id else { return nil }
+            return membership.group
+        }
+        let uniqueByID = Dictionary(grouping: explicitGroups, by: \.id).compactMap { $0.value.first }
+        if uniqueByID.isEmpty {
+            if let legacyGroup = student.group {
+                return [legacyGroup]
+            }
+            return []
+        }
+        return uniqueByID.sorted { $0.name < $1.name }
+    }
+
+    func primaryGroup(for student: Student) -> CohortGroup? {
+        let assignedGroups = groups(for: student)
+        guard assignedGroups.count == 1 else { return nil }
+        return assignedGroups.first
+    }
+
+    func isUngrouped(student: Student) -> Bool {
+        groups(for: student).isEmpty
+    }
+
+    func setGroups(
+        for student: Student,
+        groups: [CohortGroup],
+        updateLegacyGroupField: Bool = true
+    ) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        do {
+            try await setGroupsInternal(
+                for: student,
+                groups: groups,
+                updateLegacyGroupField: updateLegacyGroupField
+            )
+        } catch {
+            lastErrorMessage = "Failed to update student groups: \(error.localizedDescription)"
+            await reloadAllData()
+        }
+    }
+
+    func addStudentToGroup(_ student: Student, group: CohortGroup) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        do {
+            try await addStudentToGroupInternal(student, group: group, updateLegacyGroupField: true)
+        } catch {
+            lastErrorMessage = "Failed to add student to group: \(error.localizedDescription)"
+            await reloadAllData()
+        }
+    }
+
+    func removeStudentFromGroup(_ student: Student, group: CohortGroup) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        do {
+            try await removeStudentFromGroupInternal(student, group: group, updateLegacyGroupField: true)
+        } catch {
+            lastErrorMessage = "Failed to remove student from group: \(error.localizedDescription)"
+            await reloadAllData()
+        }
+    }
+
+    func createLearningObjective(
+        code: String,
+        title: String,
+        description: String = "",
+        isQuantitative: Bool = false,
+        parent: LearningObjective? = nil,
+        sortOrder: Int? = nil
+    ) async -> LearningObjective? {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return nil }
+
+        let objective = LearningObjective(
+            code: code,
+            title: title,
+            description: description,
+            isQuantitative: isQuantitative,
+            parentCode: parent?.code,
+            parentId: parent?.id,
+            sortOrder: sortOrder ?? ((allLearningObjectives.map(\.sortOrder).max() ?? 0) + 1),
+            isArchived: false
+        )
+
+        allLearningObjectives.append(objective)
+        setLearningObjectives(allLearningObjectives)
+
+        do {
+            try await saveLearningObjectiveRecord(objective)
+            return objective
+        } catch {
+            allLearningObjectives.removeAll { $0.id == objective.id }
+            setLearningObjectives(allLearningObjectives)
+            lastErrorMessage = "Failed to create learning objective: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func updateLearningObjective(
+        _ objective: LearningObjective,
+        code: String,
+        title: String,
+        description: String,
+        isQuantitative: Bool,
+        parent: LearningObjective?,
+        sortOrder: Int,
+        isArchived: Bool
+    ) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+
+        let previousCode = objective.code
+        let previousTitle = objective.title
+        let previousDescription = objective.objectiveDescription
+        let previousIsQuantitative = objective.isQuantitative
+        let previousParentId = objective.parentId
+        let previousParentCode = objective.parentCode
+        let previousSortOrder = objective.sortOrder
+        let previousIsArchived = objective.isArchived
+
+        objective.code = code
+        objective.title = title
+        objective.objectiveDescription = description
+        objective.isQuantitative = isQuantitative
+        objective.parentId = parent?.id
+        objective.parentCode = parent?.code
+        objective.sortOrder = sortOrder
+        objective.isArchived = isArchived
+        setLearningObjectives(allLearningObjectives)
+
+        do {
+            try await saveLearningObjectiveRecord(objective)
+        } catch {
+            objective.code = previousCode
+            objective.title = previousTitle
+            objective.objectiveDescription = previousDescription
+            objective.isQuantitative = previousIsQuantitative
+            objective.parentId = previousParentId
+            objective.parentCode = previousParentCode
+            objective.sortOrder = previousSortOrder
+            objective.isArchived = previousIsArchived
+            setLearningObjectives(allLearningObjectives)
+            lastErrorMessage = "Failed to update learning objective: \(error.localizedDescription)"
+        }
+    }
+
+    func archiveLearningObjective(_ objective: LearningObjective) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        guard objective.isArchived == false else { return }
+        objective.isArchived = true
+        setLearningObjectives(allLearningObjectives)
+
+        do {
+            try await saveLearningObjectiveRecord(objective)
+        } catch {
+            objective.isArchived = false
+            setLearningObjectives(allLearningObjectives)
+            lastErrorMessage = "Failed to archive learning objective: \(error.localizedDescription)"
         }
     }
 
@@ -458,44 +669,98 @@ final class CloudKitStore: ObservableObject {
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
 
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
-        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
 
         do {
-            let predicate = NSPredicate(format: "cohortRef == %@ AND student == %@", cohortRef, studentRef)
-            let records = try await service.queryRecords(ofType: RecordType.objectiveProgress, predicate: predicate)
+            let records = try await queryProgressRecords(cohortRef: cohortRef, studentRecordID: studentRecordID)
             let mapped = records.map { mapProgress(from: $0, student: student) }
             student.progressRecords = mapped.sorted { $0.objectiveCode < $1.objectiveCode }
             progressLoadedStudentIDs.insert(student.id)
+            scheduleObjectiveRefMigrationIfNeeded(records: records, studentRecordID: studentRecordID)
         } catch {
             lastErrorMessage = "Failed to load progress: \(error.localizedDescription)"
         }
     }
 
+    func setProgress(student: Student, objective: LearningObjective, value: Int) async {
+        await setProgressInternal(student: student, objectiveCode: objective.code, objective: objective, value: value)
+    }
+
     func setProgress(student: Student, objectiveCode: String, value: Int) async {
+        await setProgressInternal(student: student, objectiveCode: objectiveCode, objective: nil, value: value)
+    }
+
+    private func setProgressInternal(
+        student: Student,
+        objectiveCode: String,
+        objective explicitObjective: LearningObjective?,
+        value: Int
+    ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         guard let cohortRecordID else { return }
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
+        let objective = explicitObjective ?? objectiveByCode(objectiveCode)
+        let canonicalObjectiveCode = objective?.code ?? objectiveCode
 
         let progress: ObjectiveProgress
-        if let existing = student.progressRecords.first(where: { $0.objectiveCode == objectiveCode }) {
+        if let existing = student.progressRecords.first(where: { existing in
+            if let objective {
+                return existing.objectiveId == objective.id || existing.objectiveCode == objective.code
+            }
+            return existing.objectiveCode == objectiveCode
+        }) {
             progress = existing
+            progress.objectiveId = objective?.id
+            progress.objectiveCode = canonicalObjectiveCode
             progress.updateCompletion(value)
         } else {
-            progress = ObjectiveProgress(objectiveCode: objectiveCode, completionPercentage: value)
+            progress = ObjectiveProgress(
+                objectiveCode: canonicalObjectiveCode,
+                completionPercentage: value,
+                objectiveId: objective?.id,
+                value: value
+            )
             progress.student = student
             student.progressRecords.append(progress)
         }
 
-        let recordID = recordID(for: progress, lookup: progressRecordNameByID)
-        let record = CKRecord(recordType: RecordType.objectiveProgress, recordID: recordID)
+        let duplicateProgress = student.progressRecords.filter { candidate in
+            guard candidate.id != progress.id else { return false }
+            if let objective {
+                return candidate.objectiveId == objective.id || candidate.objectiveCode == objective.code
+            }
+            return candidate.objectiveCode == objectiveCode
+        }
+        for duplicate in duplicateProgress {
+            student.progressRecords.removeAll { $0.id == duplicate.id }
+            if let duplicateRecordName = progressRecordNameByID[duplicate.id] {
+                do {
+                    try await service.delete(recordID: CKRecord.ID(recordName: duplicateRecordName))
+                } catch {
+                    syncLogger.error("Failed to delete duplicate ObjectiveProgress record \(duplicateRecordName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            progressRecordNameByID.removeValue(forKey: duplicate.id)
+        }
+
+        let progressRecordID = recordID(for: progress, lookup: progressRecordNameByID)
+        let record = CKRecord(recordType: RecordType.objectiveProgress, recordID: progressRecordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        record[Field.studentRef] = studentRef
         record[Field.student] = CKRecord.Reference(recordID: studentRecordID, action: .none)
         record[Field.objectiveCode] = progress.objectiveCode
+        record[Field.value] = progress.value
         record[Field.completionPercentage] = progress.completionPercentage
         record[Field.status] = progress.status.rawValue
         record[Field.notes] = progress.notes
         record[Field.lastUpdated] = progress.lastUpdated
+        if let objective {
+            let objectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+            record[Field.objectiveRef] = CKRecord.Reference(recordID: objectiveRecordID, action: .none)
+        } else {
+            record[Field.objectiveRef] = nil
+        }
         applyAuditFields(to: record, createdAt: progress.lastUpdated)
 
         do {
@@ -531,7 +796,7 @@ final class CloudKitStore: ObservableObject {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         isLoading = true
-        resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 6)
+        resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 7)
         defer {
             isLoading = false
             resetProgress = nil
@@ -543,20 +808,22 @@ final class CloudKitStore: ObservableObject {
                 return
             }
 
-            resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting category labels...", step: 4, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 4, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting groups...", step: 5, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting memberships...", step: 5, totalSteps: 7)
+            try await deleteAllRecords(ofType: RecordType.studentGroupMembership, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 6, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting domains...", step: 6, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Deleting domains...", step: 7, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
 
-            resetProgress = ResetProgress(message: "Reloading data...", step: 6, totalSteps: 6)
+            resetProgress = ResetProgress(message: "Reloading data...", step: 7, totalSteps: 7)
             await reloadAllData()
             await ensurePresetDomains()
             syncCoordinator?.noteLocalWrite()
@@ -618,6 +885,39 @@ final class CloudKitStore: ObservableObject {
         applyStudentFields(student, to: record, cohortRecordID: cohortRecordID)
         let saved = try await service.save(record: record)
         studentRecordNameByID[student.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
+    }
+
+    private func saveLearningObjectiveRecord(
+        _ objective: LearningObjective,
+        allObjectives: [LearningObjective]? = nil
+    ) async throws {
+        guard let cohortRecordID else { return }
+        let learningObjectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+        let record = CKRecord(recordType: RecordType.learningObjective, recordID: learningObjectiveRecordID)
+        record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        record[Field.code] = objective.code
+        record[Field.title] = objective.title
+        record[Field.objectiveDescription] = objective.objectiveDescription
+        record[Field.isQuantitative] = objective.isQuantitative ? 1 : 0
+        record[Field.parentCode] = objective.parentCode
+        record[Field.sortOrder] = objective.sortOrder
+        record[Field.isArchived] = objective.isArchived ? 1 : 0
+
+        if let parent = resolvedParentObjective(for: objective, in: allObjectives ?? allLearningObjectives) {
+            let parentRecordID = recordID(for: parent, lookup: learningObjectiveRecordNameByID)
+            record[Field.parentRef] = CKRecord.Reference(recordID: parentRecordID, action: .none)
+            objective.parentId = parent.id
+            if objective.parentCode == nil {
+                objective.parentCode = parent.code
+            }
+        } else {
+            record[Field.parentRef] = nil
+        }
+
+        applyAuditFields(to: record, createdAt: Date())
+        let saved = try await service.save(record: record)
+        learningObjectiveRecordNameByID[objective.id] = saved.recordID.recordName
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -700,9 +1000,7 @@ final class CloudKitStore: ObservableObject {
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
 
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
-        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
-        let predicate = NSPredicate(format: "cohortRef == %@ AND student == %@", cohortRef, studentRef)
-        let records = try await service.queryRecords(ofType: RecordType.objectiveProgress, predicate: predicate)
+        let records = try await queryProgressRecords(cohortRef: cohortRef, studentRecordID: studentRecordID)
         for record in records {
             try await service.delete(recordID: record.recordID)
         }
@@ -747,6 +1045,72 @@ final class CloudKitStore: ObservableObject {
         return domain
     }
 
+    private func mapLearningObjectives(from records: [CKRecord]) -> [LearningObjective] {
+        guard records.isEmpty == false else { return [] }
+
+        var objectiveByRecordName: [String: LearningObjective] = [:]
+        var objectiveByCode: [String: LearningObjective] = [:]
+
+        for record in records {
+            let code = record[Field.code] as? String ?? ""
+            let title = record[Field.title] as? String ?? code
+            let description = record[Field.objectiveDescription] as? String ?? ""
+            let sortOrder = (record[Field.sortOrder] as? Int)
+                ?? (record[Field.sortOrder] as? NSNumber)?.intValue
+                ?? 0
+            let isQuantitativeRaw = (record[Field.isQuantitative] as? Int)
+                ?? (record[Field.isQuantitative] as? NSNumber)?.intValue
+                ?? 0
+            let isArchivedRaw = (record[Field.isArchived] as? Int)
+                ?? (record[Field.isArchived] as? NSNumber)?.intValue
+                ?? 0
+            let parentCode = record[Field.parentCode] as? String
+
+            let objective = LearningObjective(
+                code: code,
+                title: title,
+                description: description,
+                isQuantitative: isQuantitativeRaw != 0,
+                parentCode: parentCode,
+                sortOrder: sortOrder,
+                isArchived: isArchivedRaw != 0
+            )
+
+            if let uuid = UUID(uuidString: record.recordID.recordName) {
+                objective.id = uuid
+                learningObjectiveRecordNameByID[uuid] = record.recordID.recordName
+            } else {
+                learningObjectiveRecordNameByID[objective.id] = record.recordID.recordName
+            }
+
+            objectiveByRecordName[record.recordID.recordName] = objective
+            objectiveByCode[objective.code] = objective
+        }
+
+        for record in records {
+            guard let objective = objectiveByRecordName[record.recordID.recordName] else { continue }
+            if let parentRef = record[Field.parentRef] as? CKRecord.Reference {
+                if let parent = objectiveByRecordName[parentRef.recordID.recordName] {
+                    objective.parentId = parent.id
+                    if objective.parentCode == nil {
+                        objective.parentCode = parent.code
+                    }
+                } else if let parentUUID = UUID(uuidString: parentRef.recordID.recordName) {
+                    objective.parentId = parentUUID
+                }
+            } else if let parentCode = objective.parentCode, let parent = objectiveByCode[parentCode] {
+                objective.parentId = parent.id
+            }
+        }
+
+        return objectiveByRecordName.values.sorted {
+            if $0.sortOrder != $1.sortOrder {
+                return $0.sortOrder < $1.sortOrder
+            }
+            return $0.code < $1.code
+        }
+    }
+
     private func mapStudent(
         from record: CKRecord,
         groupMap: [String: CohortGroup],
@@ -780,13 +1144,51 @@ final class CloudKitStore: ObservableObject {
         return CategoryLabel(code: code, title: title)
     }
 
+    private func mapMembership(
+        from record: CKRecord,
+        studentMap: [String: Student],
+        groupMap: [String: CohortGroup]
+    ) -> StudentGroupMembership? {
+        guard let studentRef = studentReference(from: record) else { return nil }
+        guard let groupRef = record[Field.groupRef] as? CKRecord.Reference else { return nil }
+        guard let student = studentMap[studentRef.recordID.recordName] else { return nil }
+        guard let group = groupMap[groupRef.recordID.recordName] else { return nil }
+
+        let createdAt = (record[Field.createdAt] as? Date) ?? Date()
+        let updatedAt = (record[Field.updatedAt] as? Date) ?? createdAt
+        let membership = StudentGroupMembership(student: student, group: group, createdAt: createdAt, updatedAt: updatedAt)
+
+        if let uuid = UUID(uuidString: record.recordID.recordName) {
+            membership.id = uuid
+            membershipRecordNameByID[uuid] = record.recordID.recordName
+        } else {
+            membershipRecordNameByID[membership.id] = record.recordID.recordName
+        }
+
+        return membership
+    }
+
     private func mapProgress(from record: CKRecord, student: Student) -> ObjectiveProgress {
-        let objectiveCode = record[Field.objectiveCode] as? String ?? ""
-        let percentage = (record[Field.completionPercentage] as? Int)
+        let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+        let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+        var objectiveCode = record[Field.objectiveCode] as? String ?? ""
+        if objectiveCode.isEmpty, let objectiveId, let mappedObjective = objectiveByID(objectiveId) {
+            objectiveCode = mappedObjective.code
+        }
+
+        let canonicalValue = (record[Field.value] as? Int)
+            ?? (record[Field.value] as? NSNumber)?.intValue
+            ?? (record[Field.completionPercentage] as? Int)
             ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
             ?? 0
         let notes = record[Field.notes] as? String ?? ""
-        let progress = ObjectiveProgress(objectiveCode: objectiveCode, completionPercentage: percentage, notes: notes)
+        let progress = ObjectiveProgress(
+            objectiveCode: objectiveCode,
+            completionPercentage: canonicalValue,
+            notes: notes,
+            objectiveId: objectiveId,
+            value: canonicalValue
+        )
         progress.student = student
         if let lastUpdated = record[Field.lastUpdated] as? Date {
             progress.lastUpdated = lastUpdated
@@ -822,6 +1224,372 @@ final class CloudKitStore: ObservableObject {
         }
 
         return property
+    }
+
+    private func setLearningObjectives(_ objectives: [LearningObjective]) {
+        allLearningObjectives = objectives.sorted {
+            if $0.sortOrder != $1.sortOrder {
+                return $0.sortOrder < $1.sortOrder
+            }
+            return $0.code < $1.code
+        }
+        let parentCodeByID = Dictionary(uniqueKeysWithValues: allLearningObjectives.map { ($0.id, $0.code) })
+        for objective in allLearningObjectives where objective.parentCode == nil {
+            if let parentId = objective.parentId {
+                objective.parentCode = parentCodeByID[parentId]
+            }
+        }
+        learningObjectives = allLearningObjectives.filter { $0.isArchived == false }
+    }
+
+    private func defaultLearningObjectivesWithResolvedParents() -> [LearningObjective] {
+        let defaults = LearningObjectiveCatalog.defaultObjectives()
+        let objectiveByCode = Dictionary(uniqueKeysWithValues: defaults.map { ($0.code, $0) })
+        for objective in defaults {
+            if let parentCode = objective.parentCode, let parent = objectiveByCode[parentCode] {
+                objective.parentId = parent.id
+            }
+        }
+        return defaults
+    }
+
+    private func resolvedParentObjective(
+        for objective: LearningObjective,
+        in allObjectives: [LearningObjective]
+    ) -> LearningObjective? {
+        if let parentId = objective.parentId {
+            return allObjectives.first { $0.id == parentId }
+        }
+        if let parentCode = objective.parentCode {
+            return allObjectives.first { $0.code == parentCode }
+        }
+        return nil
+    }
+
+    private func objectiveByCode(_ code: String) -> LearningObjective? {
+        allLearningObjectives.first { $0.code == code }
+    }
+
+    private func objectiveByID(_ id: UUID) -> LearningObjective? {
+        allLearningObjectives.first { $0.id == id }
+    }
+
+    private func objectiveID(forRecordName recordName: String) -> UUID? {
+        if let uuid = UUID(uuidString: recordName) {
+            return uuid
+        }
+        return learningObjectiveRecordNameByID.first(where: { $0.value == recordName })?.key
+    }
+
+    private func progressPredicateForStudentRef(cohortRef: CKRecord.Reference, studentRecordID: CKRecord.ID) -> NSPredicate {
+        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        return NSPredicate(
+            format: "cohortRef == %@ AND studentRef == %@",
+            cohortRef,
+            studentRef
+        )
+    }
+
+    private func progressPredicateForLegacyStudentField(cohortRef: CKRecord.Reference, studentRecordID: CKRecord.ID) -> NSPredicate {
+        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        return NSPredicate(
+            format: "cohortRef == %@ AND student == %@",
+            cohortRef,
+            studentRef
+        )
+    }
+
+    private func queryProgressRecords(
+        cohortRef: CKRecord.Reference,
+        studentRecordID: CKRecord.ID
+    ) async throws -> [CKRecord] {
+        let primary = try await service.queryRecords(
+            ofType: RecordType.objectiveProgress,
+            predicate: progressPredicateForStudentRef(cohortRef: cohortRef, studentRecordID: studentRecordID)
+        )
+        let legacy = try await service.queryRecords(
+            ofType: RecordType.objectiveProgress,
+            predicate: progressPredicateForLegacyStudentField(cohortRef: cohortRef, studentRecordID: studentRecordID)
+        )
+
+        var byRecordName: [String: CKRecord] = [:]
+        for record in primary {
+            byRecordName[record.recordID.recordName] = record
+        }
+        for record in legacy {
+            byRecordName[record.recordID.recordName] = record
+        }
+        return Array(byRecordName.values)
+    }
+
+    private func studentReference(from record: CKRecord) -> CKRecord.Reference? {
+        (record[Field.studentRef] as? CKRecord.Reference)
+        ?? (record[Field.student] as? CKRecord.Reference)
+    }
+
+    private func uniqueMemberships(_ input: [StudentGroupMembership]) -> [StudentGroupMembership] {
+        var seen: Set<String> = []
+        var output: [StudentGroupMembership] = []
+        for membership in input {
+            guard let studentID = membership.student?.id, let groupID = membership.group?.id else { continue }
+            let key = "\(studentID.uuidString)|\(groupID.uuidString)"
+            guard seen.insert(key).inserted else { continue }
+            output.append(membership)
+        }
+        return output
+    }
+
+    private func explicitGroups(for student: Student) -> [CohortGroup] {
+        memberships.compactMap { membership -> CohortGroup? in
+            guard membership.student?.id == student.id else { return nil }
+            return membership.group
+        }
+    }
+
+    private func refreshLegacyGroupConvenience() {
+        for student in students {
+            refreshLegacyGroupConvenience(for: student)
+        }
+    }
+
+    private func refreshLegacyGroupConvenience(for student: Student) {
+        let explicit = explicitGroups(for: student)
+        if explicit.count == 1 {
+            student.group = explicit[0]
+        } else if explicit.count > 1 {
+            student.group = nil
+        }
+    }
+
+    private func setGroupsInternal(
+        for student: Student,
+        groups: [CohortGroup],
+        updateLegacyGroupField: Bool
+    ) async throws {
+        let desiredGroups = Dictionary(grouping: groups, by: \.id).compactMap { $0.value.first }
+        let currentGroups = explicitGroups(for: student)
+
+        let currentIDs = Set(currentGroups.map(\.id))
+        let desiredIDs = Set(desiredGroups.map(\.id))
+
+        let groupsToRemove = currentGroups.filter { desiredIDs.contains($0.id) == false }
+        for group in groupsToRemove {
+            try await removeStudentFromGroupInternal(student, group: group, updateLegacyGroupField: false)
+        }
+
+        let groupsToAdd = desiredGroups.filter { currentIDs.contains($0.id) == false }
+        for group in groupsToAdd {
+            try await addStudentToGroupInternal(student, group: group, updateLegacyGroupField: false)
+        }
+
+        if updateLegacyGroupField {
+            let explicit = explicitGroups(for: student)
+            student.group = explicit.count == 1 ? explicit.first : nil
+            try await saveStudentRecord(student)
+        }
+    }
+
+    private func addStudentToGroupInternal(
+        _ student: Student,
+        group: CohortGroup,
+        updateLegacyGroupField: Bool
+    ) async throws {
+        if memberships.contains(where: { $0.student?.id == student.id && $0.group?.id == group.id }) {
+            return
+        }
+
+        let membership = StudentGroupMembership(student: student, group: group)
+        memberships.append(membership)
+        memberships = uniqueMemberships(memberships)
+
+        try await saveMembershipRecord(membership, student: student, group: group)
+
+        if updateLegacyGroupField {
+            refreshLegacyGroupConvenience(for: student)
+            try await saveStudentRecord(student)
+        }
+    }
+
+    private func removeStudentFromGroupInternal(
+        _ student: Student,
+        group: CohortGroup,
+        updateLegacyGroupField: Bool
+    ) async throws {
+        let matched = memberships.filter { $0.student?.id == student.id && $0.group?.id == group.id }
+        guard matched.isEmpty == false else { return }
+
+        for membership in matched {
+            try await deleteMembershipRecord(membership)
+        }
+
+        if updateLegacyGroupField {
+            refreshLegacyGroupConvenience(for: student)
+            try await saveStudentRecord(student)
+        }
+    }
+
+    private func saveMembershipRecord(
+        _ membership: StudentGroupMembership,
+        student: Student,
+        group: CohortGroup
+    ) async throws {
+        guard let cohortRecordID else { return }
+        let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
+        let groupRecordID = recordID(for: group, lookup: groupRecordNameByID)
+        let recordID = recordID(for: membership, lookup: membershipRecordNameByID)
+        let record = CKRecord(recordType: RecordType.studentGroupMembership, recordID: recordID)
+        record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        record[Field.studentRef] = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        record[Field.groupRef] = CKRecord.Reference(recordID: groupRecordID, action: .none)
+        applyAuditFields(to: record, createdAt: membership.createdAt)
+
+        let saved = try await service.save(record: record)
+        membership.updatedAt = Date()
+        membershipRecordNameByID[membership.id] = saved.recordID.recordName
+        syncCoordinator?.noteLocalWrite()
+    }
+
+    private func deleteMembershipRecord(_ membership: StudentGroupMembership) async throws {
+        let recordID = recordID(for: membership, lookup: membershipRecordNameByID)
+        try await service.delete(recordID: recordID)
+        memberships.removeAll { $0.id == membership.id }
+        membershipRecordNameByID.removeValue(forKey: membership.id)
+        syncCoordinator?.noteLocalWrite()
+    }
+
+    private func deleteMemberships(forStudentID studentID: UUID) async throws {
+        let matched = memberships.filter { $0.student?.id == studentID }
+        for membership in matched {
+            try await deleteMembershipRecord(membership)
+        }
+    }
+
+    private func deleteMemberships(forGroupID groupID: UUID) async throws {
+        let matched = memberships.filter { $0.group?.id == groupID }
+        for membership in matched {
+            try await deleteMembershipRecord(membership)
+        }
+    }
+
+    func ensureLearningObjectivesSeededIfNeeded() async {
+        guard hasLoaded else { return }
+        guard let cohortRecordID else { return }
+        guard isSeedingLearningObjectives == false else { return }
+        isSeedingLearningObjectives = true
+        defer { isSeedingLearningObjectives = false }
+
+        do {
+            syncLogger.info("Checking if LearningObjective seeding is needed")
+            let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+            let records = try await service.queryRecords(
+                ofType: RecordType.learningObjective,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
+            )
+            guard records.isEmpty else { return }
+
+            let defaults = defaultLearningObjectivesWithResolvedParents()
+            if allLearningObjectives.isEmpty {
+                setLearningObjectives(defaults)
+            }
+
+            syncLogger.info("Seeding default learning objectives because remote cohort has zero records")
+            let orderedDefaults = defaults.sorted {
+                if $0.depth != $1.depth {
+                    return $0.depth < $1.depth
+                }
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.code < $1.code
+            }
+            for objective in orderedDefaults {
+                try await saveLearningObjectiveRecord(objective, allObjectives: defaults)
+            }
+            setLearningObjectives(defaults)
+            syncLogger.info("Default learning objective seed complete: \(defaults.count, privacy: .public) records")
+        } catch {
+            syncLogger.error("Learning objective seed failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func migrateLegacyGroupMembershipsIfNeeded() async {
+        guard hasLoaded else { return }
+        guard isMigratingLegacyMemberships == false else { return }
+        isMigratingLegacyMemberships = true
+        defer { isMigratingLegacyMemberships = false }
+
+        var createdCount = 0
+        do {
+            syncLogger.info("Checking for legacy student.group memberships to migrate")
+            for student in students {
+                guard let legacyGroup = student.group else { continue }
+                let hasExplicitMembership = memberships.contains {
+                    $0.student?.id == student.id && $0.group?.id == legacyGroup.id
+                }
+                let hasAnyMembershipForStudent = memberships.contains { $0.student?.id == student.id }
+                guard hasExplicitMembership == false, hasAnyMembershipForStudent == false else { continue }
+
+                try await addStudentToGroupInternal(student, group: legacyGroup, updateLegacyGroupField: false)
+                createdCount += 1
+            }
+
+            if createdCount > 0 {
+                syncLogger.info("Migrated \(createdCount, privacy: .public) legacy student.group assignments into StudentGroupMembership records")
+            } else {
+                syncLogger.info("No legacy group membership migration required")
+            }
+        } catch {
+            syncLogger.error("Legacy group membership migration failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func scheduleObjectiveRefMigrationIfNeeded(records: [CKRecord], studentRecordID: CKRecord.ID) {
+        var recordsToMigrate: [CKRecord] = []
+        for record in records {
+            let hasObjectiveRef = (record[Field.objectiveRef] as? CKRecord.Reference) != nil
+            guard hasObjectiveRef == false else { continue }
+            let code = (record[Field.objectiveCode] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard code.isEmpty == false, objectiveByCode(code) != nil else { continue }
+            guard objectiveRefMigrationRecordNames.insert(record.recordID.recordName).inserted else { continue }
+            recordsToMigrate.append(record)
+        }
+        guard recordsToMigrate.isEmpty == false else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.migrateObjectiveRefs(recordsToMigrate, studentRecordID: studentRecordID)
+        }
+    }
+
+    private func migrateObjectiveRefs(_ records: [CKRecord], studentRecordID: CKRecord.ID) async {
+        for record in records {
+            defer { objectiveRefMigrationRecordNames.remove(record.recordID.recordName) }
+            let code = (record[Field.objectiveCode] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let objective = objectiveByCode(code) else { continue }
+
+            record[Field.objectiveRef] = CKRecord.Reference(
+                recordID: recordID(for: objective, lookup: learningObjectiveRecordNameByID),
+                action: .none
+            )
+            if record[Field.studentRef] == nil {
+                record[Field.studentRef] = CKRecord.Reference(recordID: studentRecordID, action: .none)
+            }
+            if record[Field.value] == nil {
+                let fallback = (record[Field.completionPercentage] as? Int)
+                    ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
+                    ?? 0
+                record[Field.value] = fallback
+            }
+
+            applyAuditFields(to: record, createdAt: (record[Field.createdAt] as? Date) ?? Date())
+
+            do {
+                _ = try await service.save(record: record)
+                syncLogger.info("Migrated ObjectiveProgress objectiveRef for record \(record.recordID.recordName, privacy: .public)")
+            } catch {
+                syncLogger.error("Failed objectiveRef migration for progress \(record.recordID.recordName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     private func applyAuditFields(to record: CKRecord, createdAt: Date) {
@@ -950,7 +1718,9 @@ final class CloudKitStore: ObservableObject {
             let groupPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
             let domainPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
             let labelPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
+            let objectivePredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
             let studentPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
+            let membershipPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
             let progressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
             let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
 
@@ -966,9 +1736,17 @@ final class CloudKitStore: ObservableObject {
                 ofType: RecordType.categoryLabel,
                 predicate: labelPredicate
             )
+            async let objectivesChanged = service.queryRecords(
+                ofType: RecordType.learningObjective,
+                predicate: objectivePredicate
+            )
             async let studentsChanged = service.queryRecords(
                 ofType: RecordType.student,
                 predicate: studentPredicate
+            )
+            async let membershipsChanged = service.queryRecords(
+                ofType: RecordType.studentGroupMembership,
+                predicate: membershipPredicate
             )
             async let progressChanged = service.queryRecords(
                 ofType: RecordType.objectiveProgress,
@@ -979,11 +1757,12 @@ final class CloudKitStore: ObservableObject {
                 predicate: customPropPredicate
             )
 
-            let (groupRecords, domainRecords, labelRecords, studentRecords, progressRecords, customPropRecords) =
-            try await (groupsChanged, domainsChanged, labelsChanged, studentsChanged, progressChanged, customPropsChanged)
+            let (groupRecords, domainRecords, labelRecords, objectiveRecords, studentRecords, membershipRecords, progressRecords, customPropRecords) =
+            try await (groupsChanged, domainsChanged, labelsChanged, objectivesChanged, studentsChanged, membershipsChanged, progressChanged, customPropsChanged)
 
             let totalChanges = groupRecords.count + domainRecords.count + labelRecords.count +
-                              studentRecords.count + progressRecords.count + customPropRecords.count
+                              objectiveRecords.count + studentRecords.count + membershipRecords.count +
+                              progressRecords.count + customPropRecords.count
             
             if totalChanges == 0 {
                 syncLogger.info("Incremental sync: no changes found since last sync")
@@ -991,7 +1770,7 @@ final class CloudKitStore: ObservableObject {
                 return
             }
             
-            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public)")
+            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public)")
 
             // Upsert order matters: groups/domains first, then students, then child records.
             if groupRecords.isEmpty == false {
@@ -1006,9 +1785,17 @@ final class CloudKitStore: ObservableObject {
                 syncLogger.info("Applying \(labelRecords.count, privacy: .public) category label changes")
                 applyCategoryLabelChanges(labelRecords)
             }
+            if objectiveRecords.isEmpty == false {
+                syncLogger.info("Applying \(objectiveRecords.count, privacy: .public) learning objective changes")
+                applyLearningObjectiveChanges(objectiveRecords)
+            }
             if studentRecords.isEmpty == false {
                 syncLogger.info("Applying \(studentRecords.count, privacy: .public) student changes")
                 applyStudentChanges(studentRecords)
+            }
+            if membershipRecords.isEmpty == false {
+                syncLogger.info("Applying \(membershipRecords.count, privacy: .public) membership changes")
+                applyMembershipChanges(membershipRecords)
             }
             if progressRecords.isEmpty == false {
                 syncLogger.info("Applying \(progressRecords.count, privacy: .public) progress changes")
@@ -1048,6 +1835,10 @@ final class CloudKitStore: ObservableObject {
             deleteStudentByRecordID(recordID)
         case RecordType.categoryLabel:
             deleteCategoryLabelByRecordID(recordID)
+        case RecordType.learningObjective:
+            deleteLearningObjectiveByRecordID(recordID)
+        case RecordType.studentGroupMembership:
+            deleteMembershipByRecordID(recordID)
         case RecordType.objectiveProgress:
             deleteProgressByRecordID(recordID)
         case RecordType.studentCustomProperty:
@@ -1076,13 +1867,15 @@ final class CloudKitStore: ObservableObject {
             // Fetch all records (not just IDs) so we can add missing ones
             async let groupRecords = service.queryRecords(ofType: RecordType.cohortGroup, predicate: predicate)
             async let domainRecords = service.queryRecords(ofType: RecordType.domain, predicate: predicate)
+            async let objectiveRecords = service.queryRecords(ofType: RecordType.learningObjective, predicate: predicate)
             async let studentRecords = service.queryRecords(ofType: RecordType.student, predicate: predicate)
+            async let membershipRecords = service.queryRecords(ofType: RecordType.studentGroupMembership, predicate: predicate)
             async let labelRecords = service.queryRecords(ofType: RecordType.categoryLabel, predicate: predicate)
 
-            let (remoteGroups, remoteDomains, remoteStudents, remoteLabels) =
-            try await (groupRecords, domainRecords, studentRecords, labelRecords)
+            let (remoteGroups, remoteDomains, remoteObjectives, remoteStudents, remoteMemberships, remoteLabels) =
+            try await (groupRecords, domainRecords, objectiveRecords, studentRecords, membershipRecords, labelRecords)
 
-            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
+            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
 
             // Apply ALL remote records - handles adds AND updates
             if remoteGroups.isEmpty == false {
@@ -1091,11 +1884,17 @@ final class CloudKitStore: ObservableObject {
             if remoteDomains.isEmpty == false {
                 applyDomainChanges(remoteDomains)
             }
+            if remoteObjectives.isEmpty == false {
+                applyLearningObjectiveChanges(remoteObjectives)
+            }
             if remoteLabels.isEmpty == false {
                 applyCategoryLabelChanges(remoteLabels)
             }
             if remoteStudents.isEmpty == false {
                 applyStudentChanges(remoteStudents)
+            }
+            if remoteMemberships.isEmpty == false {
+                applyMembershipChanges(remoteMemberships)
             }
 
             // Remove locally-held records that no longer exist on server (deletions)
@@ -1115,6 +1914,18 @@ final class CloudKitStore: ObservableObject {
             let localStudentIDs = Set(studentRecordNameByID.values)
             for recordName in localStudentIDs.subtracting(remoteStudentIDs) {
                 deleteStudentByRecordID(CKRecord.ID(recordName: recordName))
+            }
+
+            let remoteObjectiveIDs = Set(remoteObjectives.map { $0.recordID.recordName })
+            let localObjectiveIDs = Set(learningObjectiveRecordNameByID.values)
+            for recordName in localObjectiveIDs.subtracting(remoteObjectiveIDs) {
+                deleteLearningObjectiveByRecordID(CKRecord.ID(recordName: recordName))
+            }
+
+            let remoteMembershipIDs = Set(remoteMemberships.map { $0.recordID.recordName })
+            let localMembershipIDs = Set(membershipRecordNameByID.values)
+            for recordName in localMembershipIDs.subtracting(remoteMembershipIDs) {
+                deleteMembershipByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             let remoteLabelIDs = Set(remoteLabels.map { $0.recordID.recordName })
@@ -1143,7 +1954,7 @@ final class CloudKitStore: ObservableObject {
             
             // Apply ALL remote progress records for loaded students (handles adds AND updates)
             let relevantRecords = remoteProgressRecords.filter { record in
-                guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
+                guard let studentRef = studentReference(from: record) else { return false }
                 guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
                 return progressLoadedStudentIDs.contains(uuid)
             }
@@ -1173,7 +1984,7 @@ final class CloudKitStore: ObservableObject {
             
             // Apply ALL remote custom property records for loaded students (handles adds AND updates)
             let relevantRecords = remoteCustomPropRecords.filter { record in
-                guard let studentRef = record[Field.student] as? CKRecord.Reference else { return false }
+                guard let studentRef = studentReference(from: record) else { return false }
                 guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
                 return customPropertiesLoadedStudentIDs.contains(uuid)
             }
@@ -1207,8 +2018,12 @@ final class CloudKitStore: ObservableObject {
             applyDomainChanges([record])
         case RecordType.categoryLabel:
             applyCategoryLabelChanges([record])
+        case RecordType.learningObjective:
+            applyLearningObjectiveChanges([record])
         case RecordType.student:
             applyStudentChanges([record])
+        case RecordType.studentGroupMembership:
+            applyMembershipChanges([record])
         case RecordType.objectiveProgress:
             applyProgressChanges([record])
         case RecordType.studentCustomProperty:
@@ -1296,6 +2111,50 @@ final class CloudKitStore: ObservableObject {
         categoryLabels.sort { $0.key < $1.key }
     }
 
+    private func applyLearningObjectiveChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+        objectWillChange.send()
+
+        var mergedByRecordName: [String: CKRecord] = [:]
+        for objective in allLearningObjectives {
+            let recordName = learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+            let recordID = CKRecord.ID(recordName: recordName)
+            let record = CKRecord(recordType: RecordType.learningObjective, recordID: recordID)
+            record[Field.code] = objective.code
+            record[Field.title] = objective.title
+            record[Field.objectiveDescription] = objective.objectiveDescription
+            record[Field.isQuantitative] = objective.isQuantitative ? 1 : 0
+            record[Field.parentCode] = objective.parentCode
+            record[Field.sortOrder] = objective.sortOrder
+            record[Field.isArchived] = objective.isArchived ? 1 : 0
+            mergedByRecordName[recordName] = record
+        }
+        for record in records {
+            mergedByRecordName[record.recordID.recordName] = record
+        }
+
+        let remapped = mapLearningObjectives(from: Array(mergedByRecordName.values))
+        setLearningObjectives(remapped)
+    }
+
+    private func applyMembershipChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+        objectWillChange.send()
+
+        let studentMap = dictionaryByRecordName(items: students, recordNameLookup: studentRecordNameByID)
+        let groupMap = dictionaryByRecordName(items: groups, recordNameLookup: groupRecordNameByID)
+
+        for record in records {
+            if let mapped = mapMembership(from: record, studentMap: studentMap, groupMap: groupMap) {
+                memberships.removeAll { $0.id == mapped.id }
+                memberships.append(mapped)
+            }
+        }
+
+        memberships = uniqueMemberships(memberships)
+        refreshLegacyGroupConvenience()
+    }
+
     private func applyStudentChanges(_ records: [CKRecord]) {
         guard records.isEmpty == false else { return }
 
@@ -1351,6 +2210,7 @@ final class CloudKitStore: ObservableObject {
         }
 
         students.sort { $0.createdAt < $1.createdAt }
+        refreshLegacyGroupConvenience()
         syncLogger.info("Students array now has \(self.students.count, privacy: .public) students")
     }
 
@@ -1369,7 +2229,7 @@ final class CloudKitStore: ObservableObject {
         }()
 
         for record in records {
-            guard let studentRef = record[Field.student] as? CKRecord.Reference else { continue }
+            guard let studentRef = studentReference(from: record) else { continue }
             guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
             guard let student = students.first(where: { $0.id == studentID }) else { continue }
 
@@ -1379,27 +2239,52 @@ final class CloudKitStore: ObservableObject {
                 continue
             }
 
-            let objectiveCode = record[Field.objectiveCode] as? String ?? ""
-            let percentage = (record[Field.completionPercentage] as? Int)
+            let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+            let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+            var objectiveCode = record[Field.objectiveCode] as? String ?? ""
+            if objectiveCode.isEmpty, let objectiveId, let objective = objectiveByID(objectiveId) {
+                objectiveCode = objective.code
+            }
+
+            let canonicalValue = (record[Field.value] as? Int)
+                ?? (record[Field.value] as? NSNumber)?.intValue
+                ?? (record[Field.completionPercentage] as? Int)
                 ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
                 ?? 0
             let notes = record[Field.notes] as? String ?? ""
             let lastUpdated = (record[Field.lastUpdated] as? Date) ?? Date()
             let statusRaw = record[Field.status] as? String
-            let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: percentage)
+            let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: canonicalValue)
 
             let uuid = UUID(uuidString: record.recordID.recordName) ?? UUID()
+            if let duplicate = student.progressRecords.first(where: { existing in
+                guard existing.id != uuid else { return false }
+                if let objectiveId {
+                    return existing.objectiveId == objectiveId
+                }
+                return existing.objectiveCode == objectiveCode
+            }) {
+                student.progressRecords.removeAll { $0.id == duplicate.id }
+                progressRecordNameByID.removeValue(forKey: duplicate.id)
+            }
 
             if let existing = student.progressRecords.first(where: { $0.id == uuid }) {
-                syncLogger.info("Updating progress for \(objectiveCode, privacy: .public): \(percentage, privacy: .public)%")
+                syncLogger.info("Updating progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
+                existing.objectiveId = objectiveId
                 existing.objectiveCode = objectiveCode
                 existing.notes = notes
                 existing.lastUpdated = lastUpdated
                 existing.status = status
-                existing.updateCompletion(percentage)
+                existing.updateCompletion(canonicalValue)
             } else {
-                syncLogger.info("Adding new progress for \(objectiveCode, privacy: .public): \(percentage, privacy: .public)%")
-                let p = ObjectiveProgress(objectiveCode: objectiveCode, completionPercentage: percentage, notes: notes)
+                syncLogger.info("Adding new progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
+                let p = ObjectiveProgress(
+                    objectiveCode: objectiveCode,
+                    completionPercentage: canonicalValue,
+                    notes: notes,
+                    objectiveId: objectiveId,
+                    value: canonicalValue
+                )
                 p.id = uuid
                 p.student = student
                 p.notes = notes
@@ -1410,6 +2295,7 @@ final class CloudKitStore: ObservableObject {
 
             progressRecordNameByID[uuid] = record.recordID.recordName
             student.progressRecords.sort { $0.objectiveCode < $1.objectiveCode }
+            scheduleObjectiveRefMigrationIfNeeded(records: [record], studentRecordID: studentRef.recordID)
         }
     }
 
@@ -1428,7 +2314,7 @@ final class CloudKitStore: ObservableObject {
         }()
 
         for record in records {
-            guard let studentRef = record[Field.student] as? CKRecord.Reference else { continue }
+            guard let studentRef = studentReference(from: record) else { continue }
             guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
             guard let student = students.first(where: { $0.id == studentID }) else { continue }
 
@@ -1469,10 +2355,10 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         groups.removeAll { $0.id == uuid }
         groupRecordNameByID.removeValue(forKey: uuid)
-
-        for student in students where student.group?.id == uuid {
-            student.group = nil
-        }
+        memberships.removeAll { $0.group?.id == uuid }
+        let remainingMembershipIDs = Set(memberships.map(\.id))
+        membershipRecordNameByID = membershipRecordNameByID.filter { remainingMembershipIDs.contains($0.key) }
+        refreshLegacyGroupConvenience()
     }
 
     private func deleteDomainByRecordID(_ recordID: CKRecord.ID) {
@@ -1493,6 +2379,9 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         students.removeAll { $0.id == uuid }
         studentRecordNameByID.removeValue(forKey: uuid)
+        memberships.removeAll { $0.student?.id == uuid }
+        let remainingMembershipIDs = Set(memberships.map(\.id))
+        membershipRecordNameByID = membershipRecordNameByID.filter { remainingMembershipIDs.contains($0.key) }
         progressLoadedStudentIDs.remove(uuid)
         customPropertiesLoadedStudentIDs.remove(uuid)
     }
@@ -1502,6 +2391,34 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Deleting category label: \(key, privacy: .public)")
         objectWillChange.send()
         categoryLabels.removeAll { $0.key == key || $0.code == key }
+    }
+
+    private func deleteLearningObjectiveByRecordID(_ recordID: CKRecord.ID) {
+        let objectiveID = objectiveID(forRecordName: recordID.recordName)
+        guard let objectiveID else { return }
+        syncLogger.info("Deleting learning objective id: \(objectiveID.uuidString.prefix(8), privacy: .public)")
+        objectWillChange.send()
+        allLearningObjectives.removeAll { $0.id == objectiveID }
+        learningObjectiveRecordNameByID.removeValue(forKey: objectiveID)
+        setLearningObjectives(allLearningObjectives)
+    }
+
+    private func deleteMembershipByRecordID(_ recordID: CKRecord.ID) {
+        guard let membershipID = UUID(uuidString: recordID.recordName) else {
+            if let resolved = membershipRecordNameByID.first(where: { $0.value == recordID.recordName })?.key {
+                syncLogger.info("Deleting membership with non-UUID recordName mapped to \(resolved.uuidString.prefix(8), privacy: .public)")
+                objectWillChange.send()
+                memberships.removeAll { $0.id == resolved }
+                membershipRecordNameByID.removeValue(forKey: resolved)
+                refreshLegacyGroupConvenience()
+            }
+            return
+        }
+        syncLogger.info("Deleting membership with id: \(membershipID.uuidString.prefix(8), privacy: .public)")
+        objectWillChange.send()
+        memberships.removeAll { $0.id == membershipID }
+        membershipRecordNameByID.removeValue(forKey: membershipID)
+        refreshLegacyGroupConvenience()
     }
 
     private func deleteProgressByRecordID(_ recordID: CKRecord.ID) {
@@ -1535,7 +2452,9 @@ final class CloudKitStore: ObservableObject {
         static let cohortGroup = "CohortGroup"
         static let domain = "Domain"
         static let categoryLabel = "CategoryLabel"
+        static let learningObjective = "LearningObjective"
         static let student = "Student"
+        static let studentGroupMembership = "StudentGroupMembership"
         static let studentCustomProperty = "StudentCustomProperty"
         static let objectiveProgress = "ObjectiveProgress"
     }
@@ -1549,15 +2468,23 @@ final class CloudKitStore: ObservableObject {
         static let code = "code"
         static let title = "title"
         static let group = "group"
+        static let groupRef = "groupRef"
         static let domain = "domain"
         static let session = "session"
         static let student = "student"
+        static let studentRef = "studentRef"
+        static let objectiveRef = "objectiveRef"
         static let objectiveCode = "objectiveCode"
         static let completionPercentage = "completionPercentage"
         static let status = "status"
         static let notes = "notes"
         static let lastUpdated = "lastUpdated"
         static let value = "value"
+        static let parentRef = "parentRef"
+        static let parentCode = "parentCode"
+        static let objectiveDescription = "objectiveDescription"
+        static let isQuantitative = "isQuantitative"
+        static let isArchived = "isArchived"
         static let sortOrder = "sortOrder"
         static let createdAt = "createdAt"
         static let updatedAt = "updatedAt"

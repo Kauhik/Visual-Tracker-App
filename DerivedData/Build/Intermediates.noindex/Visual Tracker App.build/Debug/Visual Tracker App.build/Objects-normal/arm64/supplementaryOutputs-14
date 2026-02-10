@@ -1,0 +1,23 @@
+{
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/ContentView.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ContentView.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/ContentView.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Visual_Tracker_AppApp.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Visual_Tracker_AppApp.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Visual_Tracker_AppApp.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Visual_Tracker_AppApp.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Visual_Tracker_AppApp.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Visual_Tracker_AppApp.swiftdeps"
+  }
+}

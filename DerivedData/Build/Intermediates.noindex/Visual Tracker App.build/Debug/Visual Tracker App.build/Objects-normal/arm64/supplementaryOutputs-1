@@ -1,0 +1,30 @@
+{
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Models/CategoryLabel.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategoryLabel.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategoryLabel.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategoryLabel.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategoryLabel.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CategoryLabel.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Models/CohortGroup.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CohortGroup.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CohortGroup.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CohortGroup.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CohortGroup.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CohortGroup.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Models/CustomPropertyRow.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CustomPropertyRow.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CustomPropertyRow.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CustomPropertyRow.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CustomPropertyRow.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CustomPropertyRow.swiftdeps"
+  },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Models/Domain.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Domain.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Domain.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Domain.dia",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Domain.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/Domain.swiftdeps"
+  }
+}

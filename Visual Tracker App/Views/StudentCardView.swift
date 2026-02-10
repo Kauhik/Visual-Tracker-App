@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct StudentCardView: View {
+    @EnvironmentObject private var store: CloudKitStore
     @Environment(ZoomManager.self) private var zoomManager
 
     let student: Student
@@ -93,8 +94,9 @@ struct StudentCardView: View {
     }
 
     private var metadataBadges: some View {
-        let name = student.group?.name ?? "Ungrouped"
-        let color = Color(hex: student.group?.colorHex) ?? Color.secondary.opacity(0.25)
+        let primaryGroup = store.primaryGroup(for: student)
+        let name = primaryGroup?.name ?? "Ungrouped"
+        let color = Color(hex: primaryGroup?.colorHex) ?? Color.secondary.opacity(0.25)
 
         let groupPill = HStack(spacing: zoomManager.scaled(6)) {
             Circle()

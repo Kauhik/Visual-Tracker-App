@@ -17,7 +17,7 @@ struct ObjectiveTreeView: View {
     
     private var childObjectives: [LearningObjective] {
         return allObjectives
-            .filter { $0.parentCode == rootObjective.code }
+            .filter { $0.isChild(of: rootObjective) && $0.isArchived == false }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
     

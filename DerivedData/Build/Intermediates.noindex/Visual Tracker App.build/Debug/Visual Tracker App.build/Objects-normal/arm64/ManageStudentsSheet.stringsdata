@@ -1,0 +1,192 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/ManageStudentsSheet.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Choose how you want to add students to your cohort.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 27
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Students",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 17
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 23
+        }
+      },
+      {
+        "comment": "",
+        "key": "Import Complete",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 230
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mass Import (CSV)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 149
+        }
+      },
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
+        "key": "Your CSV must include these headers: Full Name, Expertise Check, Learning Session",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 160
+        }
+      },
+      {
+        "comment": "",
+        "key": "Only these columns will be used.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 162
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose CSV File",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 168
+        }
+      },
+      {
+        "comment": "",
+        "key": "Importing %lld / %lld",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 196
+        }
+      },
+      {
+        "comment": "",
+        "key": "Importing...",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 205
+        }
+      },
+      {
+        "comment": "",
+        "key": "Import Students",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 205
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag & drop your CSV here",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 254
+        }
+      },
+      {
+        "comment": "",
+        "key": "or use the file picker above",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Preview",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 280
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a CSV file to preview the first 10 rows.",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 287
+        }
+      },
+      {
+        "comment": "",
+        "key": "No CSV Loaded",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 285
+        }
+      },
+      {
+        "comment": "",
+        "key": "Showing first 10 of %lld rows.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 316
+        }
+      },
+      {
+        "comment": "",
+        "key": "Full Name",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expertise Check",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 296
+        }
+      },
+      {
+        "comment": "",
+        "key": "Learning Session",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rows without a Full Name or duplicate names are skipped.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 343
+        }
+      }
+    ]
+  },
+  "version": 1
+}

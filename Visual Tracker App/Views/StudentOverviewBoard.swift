@@ -10,6 +10,8 @@ struct StudentOverviewBoard: View {
     @State private var studentToEdit: Student?
     @State private var showingManageGroups: Bool = false
     @State private var showingManageDomains: Bool = false
+    @State private var showingManageSuccessCriteria: Bool = false
+    @State private var showingManageMilestones: Bool = false
     @State private var studentPendingDelete: Student?
     @State private var searchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -31,7 +33,7 @@ struct StudentOverviewBoard: View {
 
     private var rootCategories: [LearningObjective] {
         allObjectives
-            .filter { $0.parentCode == nil }
+            .filter { $0.isRootCategory && $0.isArchived == false }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
@@ -49,9 +51,9 @@ struct StudentOverviewBoard: View {
 
         return students.filter { student in
             let nameMatches = student.name.lowercased().contains(query)
-            let groupName = student.group?.name.lowercased() ?? ""
-            let groupMatches = groupName.contains(query)
-            let ungroupedMatches = query.contains("ungrouped") && student.group == nil
+            let studentGroups = store.groups(for: student)
+            let groupMatches = studentGroups.contains { $0.name.lowercased().contains(query) }
+            let ungroupedMatches = query.contains("ungrouped") && store.isUngrouped(student: student)
             let sessionMatches = student.session.rawValue.lowercased().contains(query)
             let domainName = student.domain?.name.lowercased() ?? ""
             let domainMatches = domainName.contains(query)
@@ -121,6 +123,38 @@ struct StudentOverviewBoard: View {
                         .padding(.vertical, zoomManager.scaled(6))
                     }
                     .buttonStyle(.plain)
+
+                    Button {
+                        showingManageSuccessCriteria = true
+                    } label: {
+                        HStack(spacing: zoomManager.scaled(10)) {
+                            Image(systemName: "list.bullet.rectangle")
+                            Text("Manage Success Criteria")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.vertical, zoomManager.scaled(6))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        showingManageMilestones = true
+                    } label: {
+                        HStack(spacing: zoomManager.scaled(10)) {
+                            Image(systemName: "list.number")
+                            Text("Manage Milestones")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.vertical, zoomManager.scaled(6))
+                    }
+                    .buttonStyle(.plain)
                 } header: {
                     Text("Cohort Overview")
                         .font(.caption)
@@ -170,6 +204,12 @@ struct StudentOverviewBoard: View {
         }
         .sheet(isPresented: $showingManageDomains) {
             ManageDomainsSheet()
+        }
+        .sheet(isPresented: $showingManageSuccessCriteria) {
+            ManageSuccessCriteriaSheet()
+        }
+        .sheet(isPresented: $showingManageMilestones) {
+            ManageMilestonesSheet()
         }
         .sheet(item: $editingCategoryTarget) { target in
             EditCategoryTitleSheet(
@@ -320,12 +360,12 @@ struct StudentOverviewBoard: View {
                 }
 
                 HStack(spacing: zoomManager.scaled(4)) {
-                    Text(student.group?.name ?? "Ungrouped")
+                    Text(store.primaryGroup(for: student)?.name ?? "Ungrouped")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .help(student.group?.name ?? "Ungrouped")
+                        .help(store.primaryGroup(for: student)?.name ?? "Ungrouped")
 
                     Text("•")
                         .font(.caption2)
@@ -397,7 +437,7 @@ struct StudentOverviewBoard: View {
 
     private func cohortCategoryRow(_ category: LearningObjective) -> some View {
         let value = ProgressCalculator.cohortObjectiveAverage(
-            objectiveCode: category.code,
+            objective: category,
             students: students,
             allObjectives: allObjectives
         )
@@ -540,10 +580,11 @@ struct StudentOverviewBoard: View {
     }
 
     private func categoryDisplayTitle(for objective: LearningObjective) -> String {
-        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+        let canonical = objective.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if canonical.isEmpty, let label = categoryLabels.first(where: { $0.key == objective.code }) {
             return label.title
         }
-        return objective.title
+        return canonical.isEmpty ? objective.code : objective.title
     }
 
     private struct CategoryEditTarget: Identifiable {

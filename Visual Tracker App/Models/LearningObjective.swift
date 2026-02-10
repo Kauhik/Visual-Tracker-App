@@ -16,20 +16,40 @@ final class LearningObjective {
     var objectiveDescription: String
     var isQuantitative: Bool
     var parentCode: String?
+    var parentId: UUID?
     var sortOrder: Int
-    
-    init(code: String, title: String, description: String = "", isQuantitative: Bool = false, parentCode: String? = nil, sortOrder: Int = 0) {
+    var isArchived: Bool
+
+    init(
+        code: String,
+        title: String,
+        description: String = "",
+        isQuantitative: Bool = false,
+        parentCode: String? = nil,
+        parentId: UUID? = nil,
+        sortOrder: Int = 0,
+        isArchived: Bool = false
+    ) {
         self.id = UUID()
         self.code = code
         self.title = title
         self.objectiveDescription = description
         self.isQuantitative = isQuantitative
         self.parentCode = parentCode
+        self.parentId = parentId
         self.sortOrder = sortOrder
+        self.isArchived = isArchived
     }
     
     var isRootCategory: Bool {
-        return parentCode == nil
+        return parentId == nil && parentCode == nil
+    }
+
+    func isChild(of parent: LearningObjective) -> Bool {
+        if let parentId {
+            return parentId == parent.id
+        }
+        return parentCode == parent.code
     }
     
     var depth: Int {

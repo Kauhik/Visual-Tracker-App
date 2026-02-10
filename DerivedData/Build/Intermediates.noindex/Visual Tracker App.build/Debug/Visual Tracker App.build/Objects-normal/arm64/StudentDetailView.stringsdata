@@ -1,0 +1,296 @@
+{
+  "source": "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Views/StudentDetailView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Delete Student",
+        "location": {
+          "startingColumn": 13,
+          "startingLine": 260
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a student from the board to view progress details.",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 238
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Students in Scope",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 228
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Student Selected",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 236
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 267
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 274
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete %@? This action cannot be undone.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 279
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change the scope shown in the overview container (group or domain)",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 625
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overall Progress",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 370
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 375
+        }
+      },
+      {
+        "comment": "",
+        "key": "A–E Summary",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 389
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Title...",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 452
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 461
+        }
+      },
+      {
+        "comment": "",
+        "key": "Legend:",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 514
+        }
+      },
+      {
+        "comment": "",
+        "key": "Click the status pill to edit progress",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 541
+        }
+      },
+      {
+        "comment": "",
+        "key": "✅",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 519
+        }
+      },
+      {
+        "comment": "",
+        "key": "Complete (100%)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 520
+        }
+      },
+      {
+        "comment": "",
+        "key": "☑️",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 526
+        }
+      },
+      {
+        "comment": "",
+        "key": "In Progress (1-99%)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 527
+        }
+      },
+      {
+        "comment": "",
+        "key": "⬜",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 533
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not Started (0%)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 534
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change the filter to see students.",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 564
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Students in Filter",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 562
+        }
+      },
+      {
+        "comment": "",
+        "key": "Student Board",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 551
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter student cards by group or domain (also sets the scope shown in header and A–E breakdown)",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 620
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add a new student",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 740
+        }
+      },
+      {
+        "comment": "",
+        "key": "Overall",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 630
+        }
+      },
+      {
+        "comment": "",
+        "key": "Groups",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 636
+        }
+      },
+      {
+        "comment": "",
+        "key": "Domains",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 660
+        }
+      },
+      {
+        "comment": "",
+        "key": "All Groups…",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 637
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ungrouped",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 643
+        }
+      },
+      {
+        "comment": "",
+        "key": "All Domains…",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 661
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Domain",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 667
+        }
+      },
+      {
+        "comment": "",
+        "key": "Scope:",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 686
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter:",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 686
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Student",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 725
+        }
+      }
+    ]
+  },
+  "version": 1
+}

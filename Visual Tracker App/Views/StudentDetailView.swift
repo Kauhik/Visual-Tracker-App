@@ -32,12 +32,12 @@ struct StudentDetailView: View {
 
     private var rootCategories: [LearningObjective] {
         allObjectives
-            .filter { $0.parentCode == nil }
+            .filter { $0.isRootCategory && $0.isArchived == false }
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
     private var ungroupedStudents: [Student] {
-        students.filter { $0.group == nil }
+        students.filter { store.isUngrouped(student: $0) }
     }
 
     private var noDomainStudents: [Student] {
@@ -58,7 +58,9 @@ struct StudentDetailView: View {
         case .ungrouped:
             return ungroupedStudents
         case .group(let id):
-            return students.filter { $0.group?.id == id }
+            return students.filter { student in
+                store.groups(for: student).contains { $0.id == id }
+            }
         case .domain(let id):
             return students.filter { $0.domain?.id == id }
         case .noDomain:
@@ -129,10 +131,20 @@ struct StudentDetailView: View {
             return ProgressCalculator.cohortOverall(students: ungroupedStudents, allObjectives: allObjectives)
         case .group(let id):
             if let group = groups.first(where: { $0.id == id }) {
-                return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
+                return ProgressCalculator.groupOverall(
+                    group: group,
+                    students: students,
+                    memberships: store.memberships,
+                    allObjectives: allObjectives
+                )
             }
             if let group = selectedGroup {
-                return ProgressCalculator.groupOverall(group: group, students: students, allObjectives: allObjectives)
+                return ProgressCalculator.groupOverall(
+                    group: group,
+                    students: students,
+                    memberships: store.memberships,
+                    allObjectives: allObjectives
+                )
             }
             return ProgressCalculator.cohortOverall(students: filteredStudents, allObjectives: allObjectives)
         case .domain, .noDomain:
@@ -405,12 +417,12 @@ struct StudentDetailView: View {
         case .student(let student):
             value = ProgressCalculator.objectivePercentage(
                 student: student,
-                objectiveCode: category.code,
+                objective: category,
                 allObjectives: allObjectives
             )
         case .overview:
             value = ProgressCalculator.cohortObjectiveAverage(
-                objectiveCode: category.code,
+                objective: category,
                 students: breakdownStudents,
                 allObjectives: allObjectives
             )
@@ -775,7 +787,7 @@ struct StudentDetailView: View {
     }
 
     private func studentMetadata(for student: Student) -> String {
-        let groupName = student.group?.name ?? "Ungrouped"
+        let groupName = store.primaryGroup(for: student)?.name ?? "Ungrouped"
         let domainName = student.domain?.name ?? "No Domain"
         return "\(groupName) • \(domainName) • \(student.session.rawValue)"
     }
@@ -810,10 +822,11 @@ struct StudentDetailView: View {
     }
 
     private func categoryDisplayTitle(for objective: LearningObjective) -> String {
-        if let label = categoryLabels.first(where: { $0.key == objective.code }) {
+        let canonical = objective.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if canonical.isEmpty, let label = categoryLabels.first(where: { $0.key == objective.code }) {
             return label.title
         }
-        return objective.title
+        return canonical.isEmpty ? objective.code : objective.title
     }
 
     private struct CategoryEditTarget: Identifiable {
