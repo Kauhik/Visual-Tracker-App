@@ -17,12 +17,12 @@ struct RenameDomainSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
-            Text("Rename Domain")
+            Text("Rename Expertise Check")
                 .font(.title2)
                 .fontWeight(.semibold)
 
             Form {
-                TextField("Domain Name", text: $name)
+                TextField("Expertise Check Name", text: $name)
             }
             .formStyle(.grouped)
 
@@ -61,7 +61,7 @@ struct RenameDomainSheet: View {
         }
 
         if collision {
-            errorMessage = "A domain with that name already exists."
+            errorMessage = "An expertise check with that name already exists."
             showingError = true
             return
         }

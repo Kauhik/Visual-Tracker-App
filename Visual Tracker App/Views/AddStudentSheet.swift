@@ -133,8 +133,8 @@ struct AddStudentSheet: View {
                         }
                     }
 
-                    Picker("Domain", selection: $selectedDomain) {
-                        Text("No Domain").tag(nil as Domain?)
+                    Picker("Expertise Check", selection: $selectedDomain) {
+                        Text("No Expertise Check").tag(nil as Domain?)
                         if domains.isEmpty == false {
                             Divider()
                             ForEach(domains) { domain in

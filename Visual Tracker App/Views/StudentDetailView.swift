@@ -94,9 +94,9 @@ struct StudentDetailView: View {
         case .group(let id):
             return groups.first(where: { $0.id == id })?.name ?? (selectedGroup?.name ?? "Group")
         case .domain(let id):
-            return domains.first(where: { $0.id == id })?.name ?? "Domain"
+            return domains.first(where: { $0.id == id })?.name ?? "Expertise Check"
         case .noDomain:
-            return "No Domain"
+            return "No Expertise Check"
         }
     }
 
@@ -111,15 +111,15 @@ struct StudentDetailView: View {
     private var scopeIconSystemName: String {
         switch selectedScope {
         case .overall:
-            return "chart.bar.fill"
+            return "person.3"
         case .ungrouped:
-            return "tray.fill"
+            return "person.2.slash"
         case .group:
-            return "folder.fill"
-        case .domain:
-            return "tag.fill"
+            return "person.2"
+        case .domain(let id):
+            return iconForExpertiseCheck(named: domains.first(where: { $0.id == id })?.name)
         case .noDomain:
-            return "tag.slash"
+            return "graduationcap.slash"
         }
     }
 
@@ -287,6 +287,11 @@ struct StudentDetailView: View {
                 Text("Delete \(studentPendingDelete.name)? This action cannot be undone.")
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                toolbarFilterMenu
+            }
+        }
         .task(id: selectedStudent?.id) {
             if let selectedStudent {
                 await activityCenter.run(message: "Loading student details…", tag: .detail) {
@@ -367,8 +372,6 @@ struct StudentDetailView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(headerSubtitle)
-
-                overviewFilterMenu
             }
             .layoutPriority(1)
 
@@ -456,11 +459,6 @@ struct StudentDetailView: View {
                     .truncationMode(.tail)
                     .help(categoryDisplayTitle(for: category))
                     .layoutPriority(1)
-                    .contextMenu {
-                        Button("Edit Title...") {
-                            editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
-                        }
-                    }
             }
 
             Spacer()
@@ -485,6 +483,12 @@ struct StudentDetailView: View {
             RoundedRectangle(cornerRadius: zoomManager.scaled(12))
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Edit Title...") {
+                editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
+            }
+        }
     }
 
     private var emptyScopeTitle: String {
@@ -496,9 +500,9 @@ struct StudentDetailView: View {
         case .group:
             return "No Students in Group"
         case .domain:
-            return "No Students in Domain"
+            return "No Students in Expertise Check"
         case .noDomain:
-            return "No Students with No Domain"
+            return "No Students with No Expertise Check"
         }
     }
 
@@ -511,9 +515,9 @@ struct StudentDetailView: View {
         case .group:
             return "No students in this scope. Add a student or move students into this group."
         case .domain:
-            return "No students in this scope. Add a student or assign students to this domain."
+            return "No students in this scope. Add a student or assign students to this expertise check."
         case .noDomain:
-            return "No students in this scope. Add a student or remove their domain assignment."
+            return "No students in this scope. Add a student or remove their expertise check assignment."
         }
     }
 
@@ -560,9 +564,6 @@ struct StudentDetailView: View {
                     .font(.headline)
 
                 Spacer()
-
-                studentBoardFilterMenu
-                    .buttonStyle(.bordered)
             }
 
             if boardStudents.isEmpty {
@@ -622,80 +623,93 @@ struct StudentDetailView: View {
         )
     }
 
-    private var studentBoardFilterMenu: some View {
-        filterMenuView(style: .standard)
-            .help("Filter student cards by group or domain (also sets the scope shown in header and A–E breakdown)")
+    private var toolbarFilterMenu: some View {
+        filterMenuView()
+            .help("Filter student cards by group or expertise check (also sets the scope shown in header and A-E breakdown)")
     }
 
-    private var overviewFilterMenu: some View {
-        filterMenuView(style: .compact)
-            .help("Change the scope shown in the overview container (group or domain)")
-    }
-
-    private func filterMenuView(style: FilterMenuStyle) -> some View {
+    private func filterMenuView() -> some View {
         Menu {
-            Button("Overall") {
+            Button {
                 beginScopeSwitch(to: .overall)
+            } label: {
+                Label("Overview", systemImage: "person.3")
             }
 
             Divider()
 
-            Menu("Groups") {
-                Button("All Groups…") {
+            Menu {
+                Button {
                     beginScopeSwitch(to: .overall)
+                } label: {
+                    Label("All Groups...", systemImage: "person.2")
                 }
 
                 Divider()
 
-                Button("Ungrouped") {
+                Button {
                     beginScopeSwitch(to: .ungrouped)
+                } label: {
+                    Label("Ungrouped", systemImage: "person.2.slash")
                 }
 
                 if groups.isEmpty == false {
                     Divider()
 
                     ForEach(groups) { group in
-                        Button(group.name) {
+                        Button {
                             beginScopeSwitch(to: .group(group.id), group: group)
+                        } label: {
+                            Label(group.name, systemImage: "person.2")
                         }
                     }
                 }
+            } label: {
+                Label("Groups", systemImage: "person.2")
             }
 
             Divider()
 
-            Menu("Domains") {
-                Button("All Domains…") {
+            Menu {
+                Button {
                     beginScopeSwitch(to: .overall)
+                } label: {
+                    Label("All Expertise Check...", systemImage: "graduationcap")
                 }
 
                 Divider()
 
-                Button("No Domain") {
+                Button {
                     beginScopeSwitch(to: .noDomain)
+                } label: {
+                    Label("No Expertise Check", systemImage: "graduationcap.slash")
                 }
 
                 if domains.isEmpty == false {
                     Divider()
 
                     ForEach(domains) { domain in
-                        Button(domain.name) {
+                        Button {
                             beginScopeSwitch(to: .domain(domain.id))
+                        } label: {
+                            Label(domain.name, systemImage: iconForExpertiseCheck(named: domain.name))
                         }
                     }
                 }
+            } label: {
+                Label("Expertise Check", systemImage: "graduationcap")
             }
         } label: {
-            HStack(spacing: zoomManager.scaled(style == .compact ? 6 : 8)) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
+            HStack(spacing: zoomManager.scaled(8)) {
+                Image(systemName: scopeIconSystemName)
                     .foregroundColor(.secondary)
 
-                Text(style == .compact ? "Scope:" : "Filter:")
-                    .font(style == .compact ? .caption2 : .caption)
+                Text("Filter:")
+                    .font(.caption)
                     .foregroundColor(.secondary)
 
                 Text(selectedScope.title(groups: groups, domains: domains))
-                    .font(style == .compact ? .caption2 : .caption)
+                    .font(.caption)
                     .fontWeight(.semibold)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -703,17 +717,17 @@ struct StudentDetailView: View {
                     .layoutPriority(1)
 
                 Image(systemName: "chevron.down")
-                    .font(style == .compact ? .caption2 : .caption2)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
-            .padding(.horizontal, zoomManager.scaled(style == .compact ? 8 : 10))
-            .padding(.vertical, zoomManager.scaled(style == .compact ? 4 : 6))
+            .padding(.horizontal, zoomManager.scaled(10))
+            .padding(.vertical, zoomManager.scaled(6))
             .background(
-                RoundedRectangle(cornerRadius: zoomManager.scaled(style == .compact ? 8 : 10))
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: zoomManager.scaled(style == .compact ? 8 : 10))
+                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
         }
@@ -801,8 +815,26 @@ struct StudentDetailView: View {
 
     private func studentMetadata(for student: Student) -> String {
         let groupName = groupSummary(for: student)
-        let domainName = student.domain?.name ?? "No Domain"
+        let domainName = student.domain?.name ?? "No Expertise Check"
         return "\(groupName) • \(domainName) • \(student.session.rawValue)"
+    }
+
+    private func iconForExpertiseCheck(named name: String?) -> String {
+        guard let name else {
+            return "graduationcap"
+        }
+
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "tech" {
+            return "cpu"
+        }
+        if normalized == "design" {
+            return "paintbrush"
+        }
+        if normalized == "domain expert" {
+            return "graduationcap"
+        }
+        return "tag"
     }
 
     private func groupSummary(for student: Student) -> String {
@@ -863,11 +895,6 @@ struct StudentDetailView: View {
             self.code = code
             self.fallbackTitle = fallbackTitle
         }
-    }
-
-    private enum FilterMenuStyle {
-        case standard
-        case compact
     }
 
     private enum DisplayMode {

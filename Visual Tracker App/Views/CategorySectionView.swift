@@ -12,6 +12,7 @@ struct CategorySectionView: View {
 
     @State private var isExpanded: Bool = true
     @State private var editingTarget: CategoryEditTarget?
+    @State private var isHeaderHovering: Bool = false
 
     private var childObjectives: [LearningObjective] {
         allObjectives
@@ -85,14 +86,6 @@ struct CategorySectionView: View {
                         .truncationMode(.tail)
                         .help(categoryDisplayTitle(for: categoryObjective))
                         .layoutPriority(1)
-                        .contextMenu {
-                            Button("Edit Title...") {
-                                editingTarget = CategoryEditTarget(
-                                    code: categoryObjective.code,
-                                    fallbackTitle: categoryObjective.title
-                                )
-                            }
-                        }
 
                     Spacer()
 
@@ -105,14 +98,27 @@ struct CategorySectionView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, zoomManager.scaled(12))
                 .padding(.horizontal, zoomManager.scaled(16))
                 .background(
                     RoundedRectangle(cornerRadius: zoomManager.scaled(10))
-                        .fill(categoryColor.opacity(0.1))
+                        .fill(categoryColor.opacity(isHeaderHovering ? 0.16 : 0.1))
                 )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { hovering in
+                isHeaderHovering = hovering
+            }
+            .contextMenu {
+                Button("Edit Title...") {
+                    editingTarget = CategoryEditTarget(
+                        code: categoryObjective.code,
+                        fallbackTitle: categoryObjective.title
+                    )
+                }
+            }
 
             if let formula = formulaDisplay, isExpanded {
                 HStack {

@@ -121,7 +121,7 @@ struct StudentCardView: View {
                 .help(groupSummary)
         }
 
-        let domainName = student.domain?.name ?? "No Domain"
+        let domainName = student.domain?.name ?? "No Expertise Check"
         let sessionLabel = "\(student.session.rawValue) • \(domainName)"
         let sessionPill = Text(sessionLabel)
             .font(.caption2)

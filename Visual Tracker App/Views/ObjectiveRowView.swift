@@ -9,6 +9,7 @@ struct ObjectiveRowView: View {
     @EnvironmentObject private var store: CloudKitStore
     @Environment(ZoomManager.self) private var zoomManager
     @State private var showingEditor: Bool = false
+    @State private var isHovering: Bool = false
 
     private var progress: ObjectiveProgress? {
         student.progress(for: objective)
@@ -130,16 +131,21 @@ struct ObjectiveRowView: View {
                 progressPill
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, zoomManager.scaled(6))
         .padding(.horizontal, zoomManager.scaled(10))
         .background(
             RoundedRectangle(cornerRadius: zoomManager.scaled(8))
-                .fill(indentLevel == 0 ? Color.accentColor.opacity(0.10) : Color.clear)
+                .fill(backgroundFillColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: zoomManager.scaled(8))
                 .stroke(Color.primary.opacity(indentLevel == 0 ? 0.08 : 0.0), lineWidth: 1)
         )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
         .contextMenu {
             if hasChildren == false {
                 Button("Set 0%") { updateProgress(0) }
@@ -190,6 +196,13 @@ struct ObjectiveRowView: View {
             )
         }
         .help("Edit progress")
+    }
+
+    private var backgroundFillColor: Color {
+        if indentLevel == 0 {
+            return Color.accentColor.opacity(isHovering ? 0.16 : 0.10)
+        }
+        return isHovering ? Color.primary.opacity(0.08) : Color.clear
     }
 
     private func updateProgress(_ newPercentage: Int) {

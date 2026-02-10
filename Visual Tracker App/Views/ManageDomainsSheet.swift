@@ -23,7 +23,7 @@ struct ManageDomainsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(16)) {
             HStack {
-                Text("Manage Domains")
+                Text("Manage Expertise Check")
                     .font(.title2)
                     .fontWeight(.semibold)
 
@@ -40,9 +40,9 @@ struct ManageDomainsSheet: View {
 
             if domains.isEmpty {
                 ContentUnavailableView(
-                    "No Domains",
+                    "No Expertise Check",
                     systemImage: "tag",
-                    description: Text("Create a domain to classify students.")
+                    description: Text("Create an expertise check to classify students.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -74,7 +74,7 @@ struct ManageDomainsSheet: View {
             }
         }
         .confirmationDialog(
-            "Delete Domain",
+            "Delete Expertise Check",
             isPresented: Binding(
                 get: { domainPendingDelete != nil },
                 set: { if $0 == false { domainPendingDelete = nil } }
@@ -94,7 +94,7 @@ struct ManageDomainsSheet: View {
         } message: {
             if let domain = domainPendingDelete {
                 let count = students.filter { $0.domain?.id == domain.id }.count
-                Text("\(count) student\(count == 1 ? "" : "s") will become No Domain.")
+                Text("\(count) student\(count == 1 ? "" : "s") will become No Expertise Check.")
             }
         }
         .alert("Action Failed", isPresented: $showingError) {
@@ -106,11 +106,11 @@ struct ManageDomainsSheet: View {
 
     private var addDomainRow: some View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
-            Text("Create Domain")
+            Text("Create Expertise Check")
                 .font(.headline)
 
             HStack(spacing: zoomManager.scaled(10)) {
-                TextField("Domain Name", text: $newDomainName)
+                TextField("Expertise Check Name", text: $newDomainName)
 
                 Picker("Colour", selection: $newDomainColor) {
                     ForEach(DomainColorPreset.allCases, id: \.self) { preset in
@@ -165,7 +165,7 @@ struct ManageDomainsSheet: View {
                     .font(.system(.callout, design: .rounded))
                     .fontWeight(.semibold)
 
-                Text("Domain average")
+                Text("Expertise Check average")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -181,7 +181,7 @@ struct ManageDomainsSheet: View {
             existing.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == trimmed.lowercased()
         }
         if collision {
-            errorMessage = "A domain with that name already exists."
+            errorMessage = "An expertise check with that name already exists."
             showingError = true
             return
         }

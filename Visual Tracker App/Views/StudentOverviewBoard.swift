@@ -92,69 +92,29 @@ struct StudentOverviewBoard: View {
                             .selectionDisabled(true)
                     }
 
-                    Button {
-                        showingManageGroups = true
-                    } label: {
-                        HStack(spacing: zoomManager.scaled(10)) {
-                            Image(systemName: "folder.badge.gearshape")
-                            Text("Manage Groups")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.vertical, zoomManager.scaled(6))
-                    }
-                    .buttonStyle(.plain)
+                    ManageSidebarRow(
+                        title: "Manage Groups",
+                        systemImage: "folder.badge.gearshape",
+                        onOpen: { showingManageGroups = true }
+                    )
 
-                    Button {
-                        showingManageDomains = true
-                    } label: {
-                        HStack(spacing: zoomManager.scaled(10)) {
-                            Image(systemName: "tag")
-                            Text("Manage Domains")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.vertical, zoomManager.scaled(6))
-                    }
-                    .buttonStyle(.plain)
+                    ManageSidebarRow(
+                        title: "Manage Expertise Check",
+                        systemImage: "graduationcap",
+                        onOpen: { showingManageDomains = true }
+                    )
 
-                    Button {
-                        showingManageSuccessCriteria = true
-                    } label: {
-                        HStack(spacing: zoomManager.scaled(10)) {
-                            Image(systemName: "list.bullet.rectangle")
-                            Text("Manage Success Criteria")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.vertical, zoomManager.scaled(6))
-                    }
-                    .buttonStyle(.plain)
+                    ManageSidebarRow(
+                        title: "Manage Success Criteria",
+                        systemImage: "list.bullet.rectangle",
+                        onOpen: { showingManageSuccessCriteria = true }
+                    )
 
-                    Button {
-                        showingManageMilestones = true
-                    } label: {
-                        HStack(spacing: zoomManager.scaled(10)) {
-                            Image(systemName: "list.number")
-                            Text("Manage Milestones")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .foregroundColor(.primary)
-                        .padding(.vertical, zoomManager.scaled(6))
-                    }
-                    .buttonStyle(.plain)
+                    ManageSidebarRow(
+                        title: "Manage Milestones",
+                        systemImage: "list.number",
+                        onOpen: { showingManageMilestones = true }
+                    )
                 } header: {
                     Text("Cohort Overview")
                         .font(.caption)
@@ -384,12 +344,12 @@ struct StudentOverviewBoard: View {
                         .font(.caption2)
                         .foregroundColor(.secondary.opacity(0.6))
 
-                    Text(student.domain?.name ?? "No Domain")
+                    Text(student.domain?.name ?? "No Expertise Check")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .help(student.domain?.name ?? "No Domain")
+                        .help(student.domain?.name ?? "No Expertise Check")
                 }
             }
             .layoutPriority(1)
@@ -646,6 +606,46 @@ struct StudentOverviewBoard: View {
         case "D": return .purple
         case "E": return .pink
         default: return .gray
+        }
+    }
+}
+
+private struct ManageSidebarRow: View {
+    @Environment(ZoomManager.self) private var zoomManager
+    @State private var isHovering: Bool = false
+
+    let title: String
+    let systemImage: String
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: zoomManager.scaled(10)) {
+                Image(systemName: systemImage)
+                Text(title)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, zoomManager.scaled(6))
+            .padding(.horizontal, zoomManager.scaled(8))
+            .background(
+                RoundedRectangle(cornerRadius: zoomManager.scaled(8))
+                    .fill(isHovering ? Color.primary.opacity(0.08) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .contextMenu {
+            Button("Open \(title)") {
+                onOpen()
+            }
         }
     }
 }

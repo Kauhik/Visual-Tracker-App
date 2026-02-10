@@ -16,9 +16,9 @@ enum StudentFilterScope: Hashable {
         case .group(let id):
             return groups.first(where: { $0.id == id })?.name ?? "Group"
         case .domain(let id):
-            return domains.first(where: { $0.id == id })?.name ?? "Domain"
+            return domains.first(where: { $0.id == id })?.name ?? "Expertise Check"
         case .noDomain:
-            return "No Domain"
+            return "No Expertise Check"
         }
     }
 }
