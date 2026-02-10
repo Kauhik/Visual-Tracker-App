@@ -190,13 +190,26 @@ struct StudentOverviewBoard: View {
             .listStyle(.sidebar)
         }
         .sheet(isPresented: $showingManageStudents) {
-            ManageStudentsSheet { name, group, session, domain, customProperties in
-                addStudent(named: name, group: group, session: session, domain: domain, customProperties: customProperties)
+            ManageStudentsSheet { name, groups, session, domain, customProperties in
+                addStudent(
+                    named: name,
+                    groups: groups,
+                    session: session,
+                    domain: domain,
+                    customProperties: customProperties
+                )
             }
         }
         .sheet(item: $studentToEdit) { student in
-            AddStudentSheet(studentToEdit: student) { name, group, session, domain, customProperties in
-                saveEditedStudent(student, name: name, group: group, session: session, domain: domain, customProperties: customProperties)
+            AddStudentSheet(studentToEdit: student) { name, groups, session, domain, customProperties in
+                saveEditedStudent(
+                    student,
+                    name: name,
+                    groups: groups,
+                    session: session,
+                    domain: domain,
+                    customProperties: customProperties
+                )
             }
         }
         .sheet(isPresented: $showingManageGroups) {
@@ -360,12 +373,12 @@ struct StudentOverviewBoard: View {
                 }
 
                 HStack(spacing: zoomManager.scaled(4)) {
-                    Text(store.primaryGroup(for: student)?.name ?? "Ungrouped")
+                    Text(groupSummary(for: student))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .help(store.primaryGroup(for: student)?.name ?? "Ungrouped")
+                        .help(groupSummary(for: student))
 
                     Text("•")
                         .font(.caption2)
@@ -492,17 +505,24 @@ struct StudentOverviewBoard: View {
         )
     }
 
-    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
+    private func addStudent(
+        named name: String,
+        groups: [CohortGroup],
+        session: Session,
+        domain: Domain?,
+        customProperties: [CustomPropertyRow]
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         Task {
             if let newStudent = await store.addStudent(
                 name: trimmed,
-                group: group,
+                group: nil,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             ) {
+                await store.setGroups(for: newStudent, groups: groups, updateLegacyGroupField: true)
                 selectedStudentId = newStudent.id
             }
         }
@@ -517,18 +537,26 @@ struct StudentOverviewBoard: View {
         }
     }
 
-    private func saveEditedStudent(_ student: Student, name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
+    private func saveEditedStudent(
+        _ student: Student,
+        name: String,
+        groups: [CohortGroup],
+        session: Session,
+        domain: Domain?,
+        customProperties: [CustomPropertyRow]
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         Task {
             await store.updateStudent(
                 student,
                 name: trimmed,
-                group: group,
+                group: nil,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             )
+            await store.setGroups(for: student, groups: groups, updateLegacyGroupField: true)
             studentToEdit = nil
         }
     }
@@ -585,6 +613,17 @@ struct StudentOverviewBoard: View {
             return label.title
         }
         return canonical.isEmpty ? objective.code : objective.title
+    }
+
+    private func groupSummary(for student: Student) -> String {
+        let studentGroups = store.groups(for: student)
+        if studentGroups.isEmpty {
+            return "Ungrouped"
+        }
+        if studentGroups.count == 1 {
+            return studentGroups[0].name
+        }
+        return "\(studentGroups[0].name) +\(studentGroups.count - 1)"
     }
 
     private struct CategoryEditTarget: Identifiable {

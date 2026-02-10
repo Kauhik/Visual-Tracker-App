@@ -248,8 +248,14 @@ struct StudentDetailView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingAddSheet) {
-            AddStudentSheet { name, group, session, domain, customProperties in
-                addStudent(named: name, group: group, session: session, domain: domain, customProperties: customProperties)
+            AddStudentSheet { name, selectedGroups, session, domain, customProperties in
+                addStudent(
+                    named: name,
+                    groups: selectedGroups,
+                    session: session,
+                    domain: domain,
+                    customProperties: customProperties
+                )
             }
         }
         .sheet(item: $editingCategoryTarget) { target in
@@ -586,8 +592,8 @@ struct StudentDetailView: View {
                                 onRequestDelete: {
                                     studentPendingDelete = boardStudent
                                 },
-                                onMoveToGroup: { group in
-                                    move(student: boardStudent, to: group)
+                                onUpdateGroups: { updatedGroups in
+                                    setGroups(for: boardStudent, groups: updatedGroups)
                                 }
                             )
                             .frame(width: zoomManager.scaled(240))
@@ -749,17 +755,24 @@ struct StudentDetailView: View {
         }
     }
 
-    private func addStudent(named name: String, group: CohortGroup?, session: Session, domain: Domain?, customProperties: [CustomPropertyRow]) {
+    private func addStudent(
+        named name: String,
+        groups: [CohortGroup],
+        session: Session,
+        domain: Domain?,
+        customProperties: [CustomPropertyRow]
+    ) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         Task {
             if let newStudent = await store.addStudent(
                 name: trimmed,
-                group: group,
+                group: nil,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             ) {
+                await store.setGroups(for: newStudent, groups: groups, updateLegacyGroupField: true)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     selectedStudent = newStudent
                 }
@@ -780,16 +793,27 @@ struct StudentDetailView: View {
         }
     }
 
-    private func move(student: Student, to group: CohortGroup?) {
+    private func setGroups(for student: Student, groups: [CohortGroup]) {
         Task {
-            await store.moveStudent(student, to: group)
+            await store.setGroups(for: student, groups: groups, updateLegacyGroupField: true)
         }
     }
 
     private func studentMetadata(for student: Student) -> String {
-        let groupName = store.primaryGroup(for: student)?.name ?? "Ungrouped"
+        let groupName = groupSummary(for: student)
         let domainName = student.domain?.name ?? "No Domain"
         return "\(groupName) • \(domainName) • \(student.session.rawValue)"
+    }
+
+    private func groupSummary(for student: Student) -> String {
+        let studentGroups = store.groups(for: student)
+        if studentGroups.isEmpty {
+            return "Ungrouped"
+        }
+        if studentGroups.count == 1 {
+            return studentGroups[0].name
+        }
+        return "\(studentGroups[0].name) +\(studentGroups.count - 1)"
     }
 
     private func studentAvatar(for student: Student) -> some View {

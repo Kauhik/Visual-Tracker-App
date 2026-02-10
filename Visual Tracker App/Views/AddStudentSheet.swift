@@ -9,7 +9,7 @@ struct AddStudentSheet: View {
     private var domains: [Domain] { store.domains }
 
     @State private var name: String = ""
-    @State private var selectedGroup: CohortGroup? = nil
+    @State private var selectedGroupIDs: Set<UUID> = []
     @State private var selectedSession: Session = .morning
     @State private var selectedDomain: Domain? = nil
     @State private var customPropertyRows: [CustomPropertyRow] = []
@@ -18,9 +18,9 @@ struct AddStudentSheet: View {
     @State private var validationErrorMessage: String = ""
 
     let studentToEdit: Student?
-    let onSave: (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void
+    let onSave: (String, [CohortGroup], Session, Domain?, [CustomPropertyRow]) -> Void
 
-    init(studentToEdit: Student? = nil, onSave: @escaping (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void) {
+    init(studentToEdit: Student? = nil, onSave: @escaping (String, [CohortGroup], Session, Domain?, [CustomPropertyRow]) -> Void) {
         self.studentToEdit = studentToEdit
         self.onSave = onSave
     }
@@ -76,13 +76,54 @@ struct AddStudentSheet: View {
                 }
 
                 Section {
-                    Picker("Group", selection: $selectedGroup) {
-                        Text("Ungrouped").tag(nil as CohortGroup?)
-                        if groups.isEmpty == false {
-                            Divider()
-                            ForEach(groups) { group in
-                                Text(group.name).tag(group as CohortGroup?)
+                    VStack(alignment: .leading, spacing: zoomManager.scaled(8)) {
+                        HStack {
+                            Text("Groups")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Spacer()
+
+                            if selectedGroupIDs.isEmpty == false {
+                                Button("Clear") {
+                                    selectedGroupIDs.removeAll()
+                                }
+                                .buttonStyle(.link)
                             }
+                        }
+
+                        if groups.isEmpty {
+                            Text("No groups available")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, zoomManager.scaled(6))
+                        } else {
+                            VStack(alignment: .leading, spacing: zoomManager.scaled(6)) {
+                                ForEach(groups) { group in
+                                    Toggle(isOn: groupSelectionBinding(for: group)) {
+                                        HStack(spacing: zoomManager.scaled(8)) {
+                                            Circle()
+                                                .fill(Color(hex: group.colorHex) ?? Color.secondary.opacity(0.35))
+                                                .frame(width: zoomManager.scaled(8), height: zoomManager.scaled(8))
+
+                                            Text(group.name)
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                                .help(group.name)
+                                        }
+                                    }
+                                    .toggleStyle(.checkbox)
+                                }
+                            }
+                            .padding(zoomManager.scaled(10))
+                            .background(
+                                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
+                                    .fill(Color(nsColor: .controlBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
                         }
                     }
 
@@ -167,7 +208,7 @@ struct AddStudentSheet: View {
             if let student = studentToEdit {
                 await store.loadCustomPropertiesIfNeeded(for: student)
                 name = student.name
-                selectedGroup = store.primaryGroup(for: student)
+                selectedGroupIDs = Set(store.groups(for: student).map(\.id))
                 selectedSession = student.session
                 selectedDomain = student.domain
                 customPropertyRows = student.customProperties
@@ -217,7 +258,21 @@ struct AddStudentSheet: View {
             return !trimmedKey.isEmpty
         }
 
-        onSave(trimmedName, selectedGroup, selectedSession, selectedDomain, validRows)
+        let selectedGroups = groups.filter { selectedGroupIDs.contains($0.id) }
+        onSave(trimmedName, selectedGroups, selectedSession, selectedDomain, validRows)
         return true
+    }
+
+    private func groupSelectionBinding(for group: CohortGroup) -> Binding<Bool> {
+        Binding(
+            get: { selectedGroupIDs.contains(group.id) },
+            set: { isSelected in
+                if isSelected {
+                    selectedGroupIDs.insert(group.id)
+                } else {
+                    selectedGroupIDs.remove(group.id)
+                }
+            }
+        )
     }
 }

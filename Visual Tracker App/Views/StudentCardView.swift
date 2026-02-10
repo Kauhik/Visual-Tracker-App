@@ -10,7 +10,7 @@ struct StudentCardView: View {
     let groups: [CohortGroup]
     let onSelect: () -> Void
     let onRequestDelete: () -> Void
-    let onMoveToGroup: (CohortGroup?) -> Void
+    let onUpdateGroups: ([CohortGroup]) -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -55,12 +55,22 @@ struct StudentCardView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Menu("Move to Group") {
-                Button("Ungrouped") { onMoveToGroup(nil) }
+            Menu("Assign Groups") {
+                Button("Ungrouped") { onUpdateGroups([]) }
                 if groups.isEmpty == false {
                     Divider()
                     ForEach(groups) { group in
-                        Button(group.name) { onMoveToGroup(group) }
+                        Button {
+                            var updatedGroups = store.groups(for: student)
+                            if updatedGroups.contains(where: { $0.id == group.id }) {
+                                updatedGroups.removeAll { $0.id == group.id }
+                            } else {
+                                updatedGroups.append(group)
+                            }
+                            onUpdateGroups(updatedGroups)
+                        } label: {
+                            Label(group.name, systemImage: assignedGroupIDs.contains(group.id) ? "checkmark.circle.fill" : "circle")
+                        }
                     }
                 }
             }
@@ -94,21 +104,21 @@ struct StudentCardView: View {
     }
 
     private var metadataBadges: some View {
-        let primaryGroup = store.primaryGroup(for: student)
-        let name = primaryGroup?.name ?? "Ungrouped"
-        let color = Color(hex: primaryGroup?.colorHex) ?? Color.secondary.opacity(0.25)
+        let assignedGroups = store.groups(for: student)
+        let groupSummary = groupSummary(for: assignedGroups)
+        let color = Color(hex: assignedGroups.first?.colorHex) ?? Color.secondary.opacity(0.25)
 
         let groupPill = HStack(spacing: zoomManager.scaled(6)) {
             Circle()
                 .fill(color)
                 .frame(width: zoomManager.scaled(8), height: zoomManager.scaled(8))
 
-            Text(name)
+            Text(groupSummary)
                 .font(.caption2)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(name)
+                .help(groupSummary)
         }
 
         let domainName = student.domain?.name ?? "No Domain"
@@ -144,5 +154,20 @@ struct StudentCardView: View {
                 RoundedRectangle(cornerRadius: zoomManager.scaled(10))
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
+    }
+
+    private var assignedGroupIDs: Set<UUID> {
+        Set(store.groups(for: student).map(\.id))
+    }
+
+    private func groupSummary(for studentGroups: [CohortGroup]) -> String {
+        if studentGroups.isEmpty {
+            return "Ungrouped"
+        }
+        if studentGroups.count == 1 {
+            return studentGroups[0].name
+        }
+        let primary = studentGroups[0].name
+        return "\(primary) +\(studentGroups.count - 1)"
     }
 }

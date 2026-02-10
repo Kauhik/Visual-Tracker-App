@@ -6,7 +6,7 @@ struct ManageStudentsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ZoomManager.self) private var zoomManager
 
-    let onAddSingle: (String, CohortGroup?, Session, Domain?, [CustomPropertyRow]) -> Void
+    let onAddSingle: (String, [CohortGroup], Session, Domain?, [CustomPropertyRow]) -> Void
 
     @State private var showingAddSingleSheet: Bool = false
     @State private var showingCSVImportSheet: Bool = false
@@ -49,8 +49,8 @@ struct ManageStudentsSheet: View {
         .padding(zoomManager.scaled(20))
         .frame(width: zoomManager.scaled(520), height: zoomManager.scaled(360))
         .sheet(isPresented: $showingAddSingleSheet) {
-            AddStudentSheet { name, group, session, domain, customProperties in
-                onAddSingle(name, group, session, domain, customProperties)
+            AddStudentSheet { name, groups, session, domain, customProperties in
+                onAddSingle(name, groups, session, domain, customProperties)
             }
         }
         .sheet(isPresented: $showingCSVImportSheet) {
