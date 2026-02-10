@@ -265,9 +265,13 @@ struct ManageMilestonesSheet: View {
 
     private func rootHeader(_ root: LearningObjective) -> some View {
         HStack(spacing: zoomManager.scaled(8)) {
-            Text(root.code)
-                .font(.system(.caption, design: .monospaced))
-                .fontWeight(.semibold)
+            SuccessCriteriaBadge(
+                code: root.code,
+                font: .system(.caption2, design: .rounded),
+                horizontalPadding: zoomManager.scaled(7),
+                verticalPadding: zoomManager.scaled(3),
+                cornerRadius: zoomManager.scaled(7)
+            )
 
             Text(root.title)
                 .font(.caption)

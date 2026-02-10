@@ -153,9 +153,14 @@ struct ManageSuccessCriteriaSheet: View {
         let childrenCount = descendants(of: objective).count
 
         return HStack(spacing: zoomManager.scaled(10)) {
-            Text(objective.code)
-                .font(.system(.body, design: .monospaced))
-                .fontWeight(.semibold)
+            SuccessCriteriaBadge(
+                code: objective.code,
+                font: .system(.caption, design: .rounded),
+                horizontalPadding: zoomManager.scaled(8),
+                verticalPadding: zoomManager.scaled(4),
+                cornerRadius: zoomManager.scaled(8),
+                minWidth: zoomManager.scaled(48)
+            )
                 .frame(width: zoomManager.scaled(72), alignment: .leading)
 
             VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {

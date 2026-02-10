@@ -416,18 +416,14 @@ struct StudentOverviewBoard: View {
         )
 
         return HStack(spacing: zoomManager.scaled(10)) {
-            Text(category.code.uppercased())
-                .font(zoomManager.scaledFont(size: 14, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(minWidth: zoomManager.scaled(22), alignment: .center)
-                .padding(.horizontal, zoomManager.scaled(8))
-                .padding(.vertical, zoomManager.scaled(4))
-                .background(
-                    RoundedRectangle(cornerRadius: zoomManager.scaled(8))
-                        .fill(categoryColor(for: category.code))
-                )
+            SuccessCriteriaBadge(
+                code: category.code,
+                font: zoomManager.scaledFont(size: 14, weight: .bold, design: .rounded),
+                horizontalPadding: zoomManager.scaled(8),
+                verticalPadding: zoomManager.scaled(4),
+                cornerRadius: zoomManager.scaled(8),
+                minWidth: zoomManager.scaled(22)
+            )
 
             Text(categoryDisplayTitle(for: category))
                 .font(.callout)
@@ -453,7 +449,7 @@ struct StudentOverviewBoard: View {
         .padding(.horizontal, zoomManager.scaled(10))
         .background(
             RoundedRectangle(cornerRadius: zoomManager.scaled(12))
-                .fill(categoryColor(for: category.code).opacity(0.10))
+                .fill(SuccessCriteriaStyle.subtleFill(for: category.code))
         )
         .listRowInsets(
             EdgeInsets(
@@ -598,16 +594,6 @@ struct StudentOverviewBoard: View {
         }
     }
 
-    private func categoryColor(for code: String) -> Color {
-        switch code {
-        case "A": return .blue
-        case "B": return .green
-        case "C": return .orange
-        case "D": return .purple
-        case "E": return .pink
-        default: return .gray
-        }
-    }
 }
 
 private struct ManageSidebarRow: View {

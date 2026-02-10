@@ -32,17 +32,6 @@ struct CategorySectionView: View {
         ObjectiveProgress.calculateStatus(from: aggregatePercentage)
     }
 
-    private var categoryColor: Color {
-        switch categoryObjective.code {
-        case "A": return .blue
-        case "B": return .green
-        case "C": return .orange
-        case "D": return .purple
-        case "E": return .pink
-        default: return .gray
-        }
-    }
-
     private var formulaDisplay: String? {
         if categoryObjective.code == "A" {
             let a1 = objectivePercentage(forCode: "A.1")
@@ -68,16 +57,13 @@ struct CategorySectionView: View {
                         .foregroundColor(.secondary)
                         .frame(width: zoomManager.scaled(16))
 
-                    Text(categoryObjective.code)
-                        .font(.system(.headline, design: .rounded))
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, zoomManager.scaled(10))
-                        .padding(.vertical, zoomManager.scaled(4))
-                        .background(
-                            RoundedRectangle(cornerRadius: zoomManager.scaled(6))
-                                .fill(categoryColor)
-                        )
+                    SuccessCriteriaBadge(
+                        code: categoryObjective.code,
+                        font: .system(.headline, design: .rounded),
+                        horizontalPadding: zoomManager.scaled(10),
+                        verticalPadding: zoomManager.scaled(4),
+                        cornerRadius: zoomManager.scaled(6)
+                    )
 
                     Text(categoryDisplayTitle(for: categoryObjective))
                         .font(.headline)
@@ -103,7 +89,7 @@ struct CategorySectionView: View {
                 .padding(.horizontal, zoomManager.scaled(16))
                 .background(
                     RoundedRectangle(cornerRadius: zoomManager.scaled(10))
-                        .fill(categoryColor.opacity(isHeaderHovering ? 0.16 : 0.1))
+                        .fill(SuccessCriteriaStyle.subtleFill(for: categoryObjective.code, isHovered: isHeaderHovering))
                 )
                 .contentShape(Rectangle())
             }

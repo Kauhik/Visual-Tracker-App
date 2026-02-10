@@ -438,18 +438,14 @@ struct StudentDetailView: View {
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
-            Text(category.code.uppercased())
-                .font(zoomManager.scaledFont(size: 15, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(minWidth: zoomManager.scaled(24), alignment: .center)
-                .padding(.horizontal, zoomManager.scaled(8))
-                .padding(.vertical, zoomManager.scaled(4))
-                .background(
-                    RoundedRectangle(cornerRadius: zoomManager.scaled(8))
-                        .fill(categoryColor(for: category.code))
-                )
+            SuccessCriteriaBadge(
+                code: category.code,
+                font: zoomManager.scaledFont(size: 15, weight: .bold, design: .rounded),
+                horizontalPadding: zoomManager.scaled(8),
+                verticalPadding: zoomManager.scaled(4),
+                cornerRadius: zoomManager.scaled(8),
+                minWidth: zoomManager.scaled(24)
+            )
 
             VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
                 Text(categoryDisplayTitle(for: category))
@@ -477,7 +473,7 @@ struct StudentDetailView: View {
         .padding(.horizontal, zoomManager.scaled(12))
         .background(
             RoundedRectangle(cornerRadius: zoomManager.scaled(12))
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(SuccessCriteriaStyle.subtleFill(for: category.code))
         )
         .overlay(
             RoundedRectangle(cornerRadius: zoomManager.scaled(12))
@@ -863,17 +859,6 @@ struct StudentDetailView: View {
             Text(student.name.prefix(1).uppercased())
                 .font(zoomManager.scaledFont(size: 26, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
-        }
-    }
-
-    private func categoryColor(for code: String) -> Color {
-        switch code {
-        case "A": return .blue
-        case "B": return .green
-        case "C": return .orange
-        case "D": return .purple
-        case "E": return .pink
-        default: return .gray
         }
     }
 
