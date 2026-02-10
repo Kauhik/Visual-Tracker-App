@@ -99,7 +99,11 @@ final class CloudKitStore: ObservableObject {
         await reloadAllData()
     }
 
-    func reloadAllData() async {
+    func reloadAllData(force: Bool = false) async {
+        if isLoading {
+            guard force else { return }
+        }
+
         isLoading = true
         lastErrorMessage = nil
         groupRecordNameByID.removeAll()
@@ -211,6 +215,10 @@ final class CloudKitStore: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    func hardRefreshFromCloudKit() async {
+        await reloadAllData(force: true)
     }
 
     func addGroup(name: String, colorHex: String?) async {

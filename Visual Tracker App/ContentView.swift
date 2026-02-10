@@ -68,13 +68,6 @@ struct ContentView: View {
             ToolbarItem(placement: .automatic) {
                 ActivityStatusView(activity: activityCenter)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Reset Data", role: .destructive) { resetData() }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
         }
         .onChange(of: studentIds) { _, newIds in
             if let selectedId = store.selectedStudentId, newIds.contains(selectedId) == false {
@@ -204,13 +197,6 @@ struct ContentView: View {
         }
     }
 
-    private func resetData() {
-        Task {
-            await store.resetAllData()
-            store.selectedStudentId = nil
-            selectedGroup = nil
-        }
-    }
 }
 
 #Preview {
