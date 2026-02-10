@@ -288,8 +288,10 @@ struct StudentDetailView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .automatic) {
+            ToolbarItemGroup(placement: .primaryAction) {
                 toolbarFilterMenu
+                hardRefreshToolbarButton
+                resetToolbarButton
             }
         }
         .task(id: selectedStudent?.id) {
@@ -696,38 +698,35 @@ struct StudentDetailView: View {
                 Label("Expertise Check", systemImage: "graduationcap")
             }
         } label: {
-            HStack(spacing: zoomManager.scaled(8)) {
-                Image(systemName: scopeIconSystemName)
-                    .foregroundColor(.secondary)
-
-                Text("Filter:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Text(selectedScope.title(groups: groups, domains: domains))
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(selectedScope.title(groups: groups, domains: domains))
-                    .layoutPriority(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, zoomManager.scaled(10))
-            .padding(.vertical, zoomManager.scaled(6))
-            .background(
-                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: zoomManager.scaled(10))
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-            )
+            Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
         }
         .menuStyle(.borderlessButton)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+    }
+
+    private var hardRefreshToolbarButton: some View {
+        Button {
+            Task { await store.hardRefreshFromCloudKit() }
+        } label: {
+            Label("Refresh", systemImage: "arrow.clockwise")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .disabled(store.isLoading)
+        .help("Force a full refresh from CloudKit")
+    }
+
+    private var resetToolbarButton: some View {
+        Menu {
+            Button("Reset Data", role: .destructive) { resetData() }
+        } label: {
+            Label("Reset", systemImage: "ellipsis.circle")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .disabled(store.isLoading)
+        .help("Reset all data")
     }
 
     private var addStudentCard: some View {
@@ -755,6 +754,14 @@ struct StudentDetailView: View {
         }
         .buttonStyle(.plain)
         .help("Add a new student")
+    }
+
+    private func resetData() {
+        Task {
+            await store.resetAllData()
+            store.selectedStudentId = nil
+            selectedGroup = nil
+        }
     }
 
     private func beginScopeSwitch(to newFilter: StudentFilterScope, group: CohortGroup? = nil) {
