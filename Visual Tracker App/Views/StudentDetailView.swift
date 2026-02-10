@@ -397,7 +397,7 @@ struct StudentDetailView: View {
     private var overviewBreakdownSection: some View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(12)) {
             HStack {
-                Text("A–E Summary")
+                Text("Summary")
                     .font(.headline)
 
                 Spacer()
