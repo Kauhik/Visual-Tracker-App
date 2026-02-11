@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct StudentDetailView: View {
     @Binding var selectedStudent: Student?
@@ -12,6 +14,11 @@ struct StudentDetailView: View {
     @State private var studentPendingDelete: Student?
 
     @State private var editingCategoryTarget: CategoryEditTarget?
+    @State private var isExportingData: Bool = false
+    @State private var showingExportSuccess: Bool = false
+    @State private var showingExportError: Bool = false
+    @State private var exportSuccessMessage: String = ""
+    @State private var exportErrorMessage: String = ""
 
     private var students: [Student] { store.students }
     private var allObjectives: [LearningObjective] { store.learningObjectives }
@@ -287,10 +294,21 @@ struct StudentDetailView: View {
                 Text("Delete \(studentPendingDelete.name)? This action cannot be undone.")
             }
         }
+        .alert("Export Complete", isPresented: $showingExportSuccess) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(exportSuccessMessage)
+        }
+        .alert("Export Failed", isPresented: $showingExportError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(exportErrorMessage)
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 toolbarFilterMenu
                 hardRefreshToolbarButton
+                exportToolbarButton
                 resetToolbarButton
             }
         }
@@ -717,6 +735,18 @@ struct StudentDetailView: View {
         .help("Force a full refresh from CloudKit")
     }
 
+    private var exportToolbarButton: some View {
+        Button {
+            exportData()
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .disabled(store.isLoading || isExportingData)
+        .help("Export the currently loaded dataset to a ZIP of CSV files")
+    }
+
     private var resetToolbarButton: some View {
         Menu {
             Button("Reset Data", role: .destructive) { resetData() }
@@ -754,6 +784,55 @@ struct StudentDetailView: View {
         }
         .buttonStyle(.plain)
         .help("Add a new student")
+    }
+
+    private func exportData() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async {
+                exportData()
+            }
+            return
+        }
+
+        guard isExportingData == false else { return }
+
+        let savePanel = NSSavePanel()
+        savePanel.canCreateDirectories = true
+        savePanel.allowedContentTypes = [.zip]
+        savePanel.nameFieldStringValue = "VisualTrackerExport_\(exportTimestamp()).zip"
+        savePanel.title = "Export Visual Tracker Data"
+        savePanel.message = "Choose where to save the CSV export ZIP."
+
+        guard savePanel.runModal() == .OK, let destinationURL = savePanel.url else {
+            return
+        }
+
+        let payload = store.makeCSVExportPayload()
+        isExportingData = true
+
+        Task(priority: .userInitiated) {
+            do {
+                let exporter = CSVExportService()
+                let result = try exporter.exportZip(payload: payload, destinationURL: destinationURL)
+                await MainActor.run {
+                    isExportingData = false
+                    exportSuccessMessage = "Exported \(result.exportedFiles.count) CSV files to \(result.outputURL.path)."
+                    showingExportSuccess = true
+                }
+            } catch {
+                await MainActor.run {
+                    isExportingData = false
+                    exportErrorMessage = error.localizedDescription
+                    showingExportError = true
+                }
+            }
+        }
+    }
+
+    private func exportTimestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HHmm"
+        return formatter.string(from: Date())
     }
 
     private func resetData() {

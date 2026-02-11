@@ -2638,3 +2638,47 @@ final class CloudKitStore: ObservableObject {
         static let lastEditedByDisplayName = "lastEditedByDisplayName"
     }
 }
+
+extension CloudKitStore {
+    func makeCSVExportPayload() -> CSVExportPayload {
+        let cohortRecordName = cohortRecordID?.recordName ?? cohortId
+        let studentRecordNameByID = self.studentRecordNameByID
+        let groupRecordNameByID = self.groupRecordNameByID
+        let membershipRecordNameByID = self.membershipRecordNameByID
+        let domainRecordNameByID = self.domainRecordNameByID
+        let learningObjectiveRecordNameByID = self.learningObjectiveRecordNameByID
+        let progressRecordNameByID = self.progressRecordNameByID
+        let customPropertyRecordNameByID = self.customPropertyRecordNameByID
+
+        return CSVExportPayload(
+            cohortRecordName: cohortRecordName,
+            students: students,
+            groups: groups,
+            memberships: memberships,
+            domains: domains,
+            learningObjectives: learningObjectives,
+            categoryLabels: categoryLabels,
+            studentRecordName: { student in
+                studentRecordNameByID[student.id] ?? student.id.uuidString
+            },
+            groupRecordName: { group in
+                groupRecordNameByID[group.id] ?? group.id.uuidString
+            },
+            membershipRecordName: { membership in
+                membershipRecordNameByID[membership.id] ?? membership.id.uuidString
+            },
+            domainRecordName: { domain in
+                domainRecordNameByID[domain.id] ?? domain.id.uuidString
+            },
+            learningObjectiveRecordName: { objective in
+                learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+            },
+            progressRecordName: { progress in
+                progressRecordNameByID[progress.id] ?? progress.id.uuidString
+            },
+            customPropertyRecordName: { property in
+                customPropertyRecordNameByID[property.id] ?? property.id.uuidString
+            }
+        )
+    }
+}
