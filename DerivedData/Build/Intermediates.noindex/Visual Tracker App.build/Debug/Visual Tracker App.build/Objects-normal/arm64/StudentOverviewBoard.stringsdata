@@ -7,7 +7,7 @@
         "key": "Delete Student",
         "location": {
           "startingColumn": 13,
-          "startingLine": 221
+          "startingLine": 183
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Rename Failed",
         "location": {
           "startingColumn": 16,
-          "startingLine": 242
+          "startingLine": 204
         }
       },
       {
@@ -23,39 +23,7 @@
         "key": "Show cohort overview",
         "location": {
           "startingColumn": 15,
-          "startingLine": 427
-        }
-      },
-      {
-        "comment": "",
-        "key": "Manage Groups",
-        "location": {
-          "startingColumn": 34,
-          "startingLine": 100
-        }
-      },
-      {
-        "comment": "",
-        "key": "Manage Domains",
-        "location": {
-          "startingColumn": 34,
-          "startingLine": 116
-        }
-      },
-      {
-        "comment": "",
-        "key": "Manage Success Criteria",
-        "location": {
-          "startingColumn": 34,
-          "startingLine": 132
-        }
-      },
-      {
-        "comment": "",
-        "key": "Manage Milestones",
-        "location": {
-          "startingColumn": 34,
-          "startingLine": 148
+          "startingLine": 390
         }
       },
       {
@@ -63,7 +31,7 @@
         "key": "Cohort Overview",
         "location": {
           "startingColumn": 26,
-          "startingLine": 159
+          "startingLine": 114
         }
       },
       {
@@ -71,7 +39,7 @@
         "key": "Edit Student…",
         "location": {
           "startingColumn": 40,
-          "startingLine": 169
+          "startingLine": 124
         }
       },
       {
@@ -79,7 +47,7 @@
         "key": "Rename",
         "location": {
           "startingColumn": 40,
-          "startingLine": 173
+          "startingLine": 128
         }
       },
       {
@@ -87,7 +55,7 @@
         "key": "Delete Student",
         "location": {
           "startingColumn": 40,
-          "startingLine": 179
+          "startingLine": 134
         }
       },
       {
@@ -95,7 +63,7 @@
         "key": "Delete",
         "location": {
           "startingColumn": 20,
-          "startingLine": 228
+          "startingLine": 190
         }
       },
       {
@@ -103,7 +71,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 234
+          "startingLine": 196
         }
       },
       {
@@ -111,7 +79,7 @@
         "key": "Delete %@? This action cannot be undone.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 239
+          "startingLine": 201
         }
       },
       {
@@ -119,7 +87,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 243
+          "startingLine": 205
         }
       },
       {
@@ -127,7 +95,7 @@
         "key": "Students",
         "location": {
           "startingColumn": 22,
-          "startingLine": 267
+          "startingLine": 229
         }
       },
       {
@@ -135,7 +103,7 @@
         "key": "No students yet",
         "location": {
           "startingColumn": 41,
-          "startingLine": 271
+          "startingLine": 233
         }
       },
       {
@@ -143,7 +111,7 @@
         "key": "%lld student%@",
         "location": {
           "startingColumn": 61,
-          "startingLine": 271
+          "startingLine": 233
         }
       },
       {
@@ -151,7 +119,7 @@
         "key": "Manage Students",
         "location": {
           "startingColumn": 23,
-          "startingLine": 281
+          "startingLine": 243
         }
       },
       {
@@ -159,7 +127,7 @@
         "key": "Search students or groups",
         "location": {
           "startingColumn": 23,
-          "startingLine": 292
+          "startingLine": 254
         }
       },
       {
@@ -167,7 +135,7 @@
         "key": "",
         "location": {
           "startingColumn": 31,
-          "startingLine": 330
+          "startingLine": 293
         }
       },
       {
@@ -175,7 +143,7 @@
         "key": "•",
         "location": {
           "startingColumn": 26,
-          "startingLine": 370
+          "startingLine": 333
         }
       },
       {
@@ -183,7 +151,7 @@
         "key": "Overall",
         "location": {
           "startingColumn": 26,
-          "startingLine": 401
+          "startingLine": 364
         }
       },
       {
@@ -191,7 +159,7 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 26,
-          "startingLine": 405
+          "startingLine": 368
         }
       },
       {
@@ -199,15 +167,31 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 18,
-          "startingLine": 474
+          "startingLine": 433
         }
       },
       {
         "comment": "",
-        "key": "Edit Title...",
+        "key": "Manage Success Criteria…",
         "location": {
           "startingColumn": 28,
-          "startingLine": 467
+          "startingLine": 422
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Milestones…",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 426
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open %@",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 610
         }
       }
     ]

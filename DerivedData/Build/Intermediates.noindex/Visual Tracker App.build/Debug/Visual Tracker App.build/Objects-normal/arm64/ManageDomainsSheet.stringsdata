@@ -4,7 +4,7 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "Delete Domain",
+        "key": "Delete Expertise Check",
         "location": {
           "startingColumn": 13,
           "startingLine": 77
@@ -20,7 +20,7 @@
       },
       {
         "comment": "",
-        "key": "Create a domain to classify students.",
+        "key": "Create an expertise check to classify students.",
         "location": {
           "startingColumn": 39,
           "startingLine": 45
@@ -28,7 +28,7 @@
       },
       {
         "comment": "",
-        "key": "No Domains",
+        "key": "No Expertise Check",
         "location": {
           "startingColumn": 21,
           "startingLine": 43
@@ -36,7 +36,7 @@
       },
       {
         "comment": "",
-        "key": "Manage Domains",
+        "key": "Manage Expertise Check",
         "location": {
           "startingColumn": 22,
           "startingLine": 26
@@ -84,7 +84,7 @@
       },
       {
         "comment": "",
-        "key": "%lld student%@ will become No Domain.",
+        "key": "%lld student%@ will become No Expertise Check.",
         "location": {
           "startingColumn": 22,
           "startingLine": 97
@@ -100,7 +100,7 @@
       },
       {
         "comment": "",
-        "key": "Create Domain",
+        "key": "Create Expertise Check",
         "location": {
           "startingColumn": 18,
           "startingLine": 109
@@ -108,7 +108,7 @@
       },
       {
         "comment": "",
-        "key": "Domain Name",
+        "key": "Expertise Check Name",
         "location": {
           "startingColumn": 27,
           "startingLine": 113
@@ -140,18 +140,26 @@
       },
       {
         "comment": "",
-        "key": "%lld%%",
+        "key": "Saving...",
         "location": {
-          "startingColumn": 22,
+          "startingColumn": 30,
           "startingLine": 154
         }
       },
       {
         "comment": "",
-        "key": "Domain average",
+        "key": "%lld%%",
         "location": {
           "startingColumn": 22,
-          "startingLine": 158
+          "startingLine": 164
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expertise Check average",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 168
         }
       }
     ]

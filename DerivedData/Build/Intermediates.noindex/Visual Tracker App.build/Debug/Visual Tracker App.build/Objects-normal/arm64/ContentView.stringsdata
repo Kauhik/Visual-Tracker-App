@@ -7,7 +7,7 @@
         "key": "CloudKit Error",
         "location": {
           "startingColumn": 16,
-          "startingLine": 168
+          "startingLine": 161
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "iCloud Sign-In Required",
         "location": {
           "startingColumn": 16,
-          "startingLine": 173
+          "startingLine": 166
         }
       },
       {
@@ -52,18 +52,10 @@
       },
       {
         "comment": "",
-        "key": "Reset Data",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 73
-        }
-      },
-      {
-        "comment": "",
         "key": "Resetting...",
         "location": {
           "startingColumn": 30,
-          "startingLine": 98
+          "startingLine": 91
         }
       },
       {
@@ -71,7 +63,7 @@
         "key": "Loading Cloud Data…",
         "location": {
           "startingColumn": 34,
-          "startingLine": 117
+          "startingLine": 110
         }
       },
       {
@@ -79,7 +71,7 @@
         "key": "Open iCloud Settings",
         "location": {
           "startingColumn": 28,
-          "startingLine": 147
+          "startingLine": 140
         }
       },
       {
@@ -87,7 +79,7 @@
         "key": "Retry",
         "location": {
           "startingColumn": 28,
-          "startingLine": 152
+          "startingLine": 145
         }
       },
       {
@@ -95,7 +87,7 @@
         "key": "Read-only mode",
         "location": {
           "startingColumn": 30,
-          "startingLine": 137
+          "startingLine": 130
         }
       },
       {
@@ -103,7 +95,7 @@
         "key": "Sign in to iCloud to enable edits and syncing.",
         "location": {
           "startingColumn": 30,
-          "startingLine": 140
+          "startingLine": 133
         }
       },
       {
@@ -111,7 +103,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 169
+          "startingLine": 162
         }
       },
       {
@@ -119,7 +111,7 @@
         "key": "Open iCloud Settings",
         "location": {
           "startingColumn": 20,
-          "startingLine": 174
+          "startingLine": 167
         }
       },
       {
@@ -127,7 +119,7 @@
         "key": "Retry",
         "location": {
           "startingColumn": 20,
-          "startingLine": 177
+          "startingLine": 170
         }
       },
       {
@@ -135,7 +127,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 180
+          "startingLine": 173
         }
       },
       {
@@ -143,7 +135,7 @@
         "key": "To enable edits and CloudKit access, sign in to iCloud on this Mac.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 182
+          "startingLine": 175
         }
       }
     ]

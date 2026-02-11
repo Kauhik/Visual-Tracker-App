@@ -11,7 +11,6 @@ struct CategorySectionView: View {
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     @State private var isExpanded: Bool = true
-    @State private var editingTarget: CategoryEditTarget?
     @State private var isHeaderHovering: Bool = false
 
     private var childObjectives: [LearningObjective] {
@@ -92,11 +91,10 @@ struct CategorySectionView: View {
                 isHeaderHovering = hovering
             }
             .contextMenu {
-                Button("Edit Title...") {
-                    editingTarget = CategoryEditTarget(
-                        code: categoryObjective.code,
-                        fallbackTitle: categoryObjective.title
-                    )
+                Button(isExpanded ? "Collapse" : "Expand") {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
                 }
             }
 
@@ -127,12 +125,6 @@ struct CategorySectionView: View {
                 .padding(.bottom, zoomManager.scaled(12))
             }
         }
-        .sheet(item: $editingTarget) { target in
-            EditCategoryTitleSheet(
-                code: target.code,
-                fallbackTitle: target.fallbackTitle
-            )
-        }
     }
 
     private func categoryDisplayTitle(for objective: LearningObjective) -> String {
@@ -150,15 +142,4 @@ struct CategorySectionView: View {
         return store.objectivePercentage(student: student, objective: objective)
     }
 
-    private struct CategoryEditTarget: Identifiable {
-        let id: String
-        let code: String
-        let fallbackTitle: String
-
-        init(code: String, fallbackTitle: String) {
-            self.id = code
-            self.code = code
-            self.fallbackTitle = fallbackTitle
-        }
-    }
 }

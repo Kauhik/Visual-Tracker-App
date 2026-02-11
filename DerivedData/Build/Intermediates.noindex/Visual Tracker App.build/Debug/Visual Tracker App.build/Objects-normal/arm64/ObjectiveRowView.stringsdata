@@ -7,7 +7,7 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 22,
-          "startingLine": 123
+          "startingLine": 89
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Edit progress",
         "location": {
           "startingColumn": 15,
-          "startingLine": 192
+          "startingLine": 163
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Set 0%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 145
+          "startingLine": 116
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Set 25%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 146
+          "startingLine": 117
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "Set 50%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 147
+          "startingLine": 118
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "Set 75%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 148
+          "startingLine": 119
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Set 100%",
         "location": {
           "startingColumn": 24,
-          "startingLine": 149
+          "startingLine": 120
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "Custom...",
         "location": {
           "startingColumn": 24,
-          "startingLine": 151
+          "startingLine": 122
         }
       }
     ]

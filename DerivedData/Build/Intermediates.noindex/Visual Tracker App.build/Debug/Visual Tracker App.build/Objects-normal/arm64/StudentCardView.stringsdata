@@ -7,7 +7,7 @@
         "key": "Opens progress tracker",
         "location": {
           "startingColumn": 28,
-          "startingLine": 75
+          "startingLine": 85
         }
       },
       {
@@ -20,7 +20,7 @@
       },
       {
         "comment": "",
-        "key": "Move to Group",
+        "key": "Assign Groups",
         "location": {
           "startingColumn": 18,
           "startingLine": 58
@@ -31,7 +31,7 @@
         "key": "Delete Student",
         "location": {
           "startingColumn": 20,
-          "startingLine": 70
+          "startingLine": 80
         }
       },
       {

@@ -7,7 +7,23 @@
         "key": "Delete Student",
         "location": {
           "startingColumn": 13,
-          "startingLine": 262
+          "startingLine": 264
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export Complete",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 286
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export Failed",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 291
         }
       },
       {
@@ -15,7 +31,7 @@
         "key": "Select a student from the board to view progress details.",
         "location": {
           "startingColumn": 47,
-          "startingLine": 240
+          "startingLine": 236
         }
       },
       {
@@ -23,7 +39,7 @@
         "key": "No Students in Scope",
         "location": {
           "startingColumn": 29,
-          "startingLine": 230
+          "startingLine": 226
         }
       },
       {
@@ -31,7 +47,7 @@
         "key": "No Student Selected",
         "location": {
           "startingColumn": 29,
-          "startingLine": 238
+          "startingLine": 234
         }
       },
       {
@@ -39,7 +55,7 @@
         "key": "Delete",
         "location": {
           "startingColumn": 20,
-          "startingLine": 269
+          "startingLine": 271
         }
       },
       {
@@ -47,7 +63,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 276
+          "startingLine": 278
         }
       },
       {
@@ -55,15 +71,55 @@
         "key": "Delete %@? This action cannot be undone.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 281
+          "startingLine": 283
         }
       },
       {
         "comment": "",
-        "key": "Change the scope shown in the overview container (group or domain)",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 287
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 292
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter student cards by group or expertise check (also sets the scope shown in header and A-E breakdown)",
         "location": {
           "startingColumn": 19,
-          "startingLine": 626
+          "startingLine": 629
+        }
+      },
+      {
+        "comment": "",
+        "key": "Force a full refresh from CloudKit",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 720
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export the currently loaded dataset to a ZIP of CSV files",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 732
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset all data and restore base Expertise Check plus default Success Criteria/Milestones",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 744
         }
       },
       {
@@ -71,7 +127,7 @@
         "key": "Overall Progress",
         "location": {
           "startingColumn": 22,
-          "startingLine": 372
+          "startingLine": 390
         }
       },
       {
@@ -79,23 +135,15 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 26,
-          "startingLine": 377
+          "startingLine": 395
         }
       },
       {
         "comment": "",
-        "key": "A–E Summary",
+        "key": "Summary",
         "location": {
           "startingColumn": 22,
-          "startingLine": 391
-        }
-      },
-      {
-        "comment": "",
-        "key": "Edit Title...",
-        "location": {
-          "startingColumn": 32,
-          "startingLine": 454
+          "startingLine": 409
         }
       },
       {
@@ -103,7 +151,23 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 22,
-          "startingLine": 463
+          "startingLine": 464
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Success Criteria…",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 485
+        }
+      },
+      {
+        "comment": "",
+        "key": "Manage Milestones…",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 489
         }
       },
       {
@@ -111,7 +175,7 @@
         "key": "Legend:",
         "location": {
           "startingColumn": 18,
-          "startingLine": 516
+          "startingLine": 527
         }
       },
       {
@@ -119,7 +183,7 @@
         "key": "Click the status pill to edit progress",
         "location": {
           "startingColumn": 18,
-          "startingLine": 543
+          "startingLine": 554
         }
       },
       {
@@ -127,7 +191,7 @@
         "key": "✅",
         "location": {
           "startingColumn": 22,
-          "startingLine": 521
+          "startingLine": 532
         }
       },
       {
@@ -135,7 +199,7 @@
         "key": "Complete (100%)",
         "location": {
           "startingColumn": 22,
-          "startingLine": 522
+          "startingLine": 533
         }
       },
       {
@@ -143,7 +207,7 @@
         "key": "☑️",
         "location": {
           "startingColumn": 22,
-          "startingLine": 528
+          "startingLine": 539
         }
       },
       {
@@ -151,7 +215,7 @@
         "key": "In Progress (1-99%)",
         "location": {
           "startingColumn": 22,
-          "startingLine": 529
+          "startingLine": 540
         }
       },
       {
@@ -159,7 +223,7 @@
         "key": "⬜",
         "location": {
           "startingColumn": 22,
-          "startingLine": 535
+          "startingLine": 546
         }
       },
       {
@@ -167,7 +231,7 @@
         "key": "Not Started (0%)",
         "location": {
           "startingColumn": 22,
-          "startingLine": 536
+          "startingLine": 547
         }
       },
       {
@@ -175,7 +239,7 @@
         "key": "Change the filter to see students.",
         "location": {
           "startingColumn": 39,
-          "startingLine": 566
+          "startingLine": 574
         }
       },
       {
@@ -183,7 +247,7 @@
         "key": "No Students in Filter",
         "location": {
           "startingColumn": 21,
-          "startingLine": 564
+          "startingLine": 572
         }
       },
       {
@@ -191,15 +255,7 @@
         "key": "Student Board",
         "location": {
           "startingColumn": 22,
-          "startingLine": 553
-        }
-      },
-      {
-        "comment": "",
-        "key": "Filter student cards by group or domain (also sets the scope shown in header and A–E breakdown)",
-        "location": {
-          "startingColumn": 19,
-          "startingLine": 621
+          "startingLine": 564
         }
       },
       {
@@ -207,79 +263,103 @@
         "key": "Add a new student",
         "location": {
           "startingColumn": 15,
-          "startingLine": 741
+          "startingLine": 771
         }
       },
       {
         "comment": "",
-        "key": "Overall",
+        "key": "Overview",
         "location": {
-          "startingColumn": 20,
-          "startingLine": 631
-        }
-      },
-      {
-        "comment": "",
-        "key": "Groups",
-        "location": {
-          "startingColumn": 18,
+          "startingColumn": 23,
           "startingLine": 637
         }
       },
       {
         "comment": "",
-        "key": "Domains",
+        "key": "All Groups...",
         "location": {
-          "startingColumn": 18,
-          "startingLine": 661
-        }
-      },
-      {
-        "comment": "",
-        "key": "All Groups…",
-        "location": {
-          "startingColumn": 24,
-          "startingLine": 638
+          "startingColumn": 27,
+          "startingLine": 646
         }
       },
       {
         "comment": "",
         "key": "Ungrouped",
         "location": {
-          "startingColumn": 24,
-          "startingLine": 644
+          "startingColumn": 27,
+          "startingLine": 654
         }
       },
       {
         "comment": "",
-        "key": "All Domains…",
+        "key": "Groups",
         "location": {
-          "startingColumn": 24,
-          "startingLine": 662
+          "startingColumn": 23,
+          "startingLine": 669
         }
       },
       {
         "comment": "",
-        "key": "No Domain",
+        "key": "All Expertise Check...",
         "location": {
-          "startingColumn": 24,
-          "startingLine": 668
+          "startingColumn": 27,
+          "startingLine": 678
         }
       },
       {
         "comment": "",
-        "key": "Scope:",
+        "key": "No Expertise Check",
         "location": {
-          "startingColumn": 42,
-          "startingLine": 687
+          "startingColumn": 27,
+          "startingLine": 686
         }
       },
       {
         "comment": "",
-        "key": "Filter:",
+        "key": "Expertise Check",
         "location": {
-          "startingColumn": 53,
-          "startingLine": 687
+          "startingColumn": 23,
+          "startingLine": 701
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 704
+        }
+      },
+      {
+        "comment": "",
+        "key": "Refresh",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 715
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 727
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset Data (Keep Base Defaults)",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 737
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 739
         }
       },
       {
@@ -287,7 +367,7 @@
         "key": "Add Student",
         "location": {
           "startingColumn": 22,
-          "startingLine": 726
+          "startingLine": 756
         }
       }
     ]

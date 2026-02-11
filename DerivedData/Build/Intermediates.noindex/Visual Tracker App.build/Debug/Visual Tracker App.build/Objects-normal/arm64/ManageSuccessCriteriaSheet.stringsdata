@@ -167,7 +167,7 @@
         "key": "Quant",
         "location": {
           "startingColumn": 22,
-          "startingLine": 175
+          "startingLine": 190
         }
       },
       {
@@ -175,7 +175,15 @@
         "key": "%lld milestone%@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 167
+          "startingLine": 172
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saving...",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 180
         }
       },
       {
@@ -183,7 +191,7 @@
         "key": "Edit Success Criterion",
         "location": {
           "startingColumn": 18,
-          "startingLine": 345
+          "startingLine": 360
         }
       },
       {
@@ -191,7 +199,7 @@
         "key": "Code: %@",
         "location": {
           "startingColumn": 18,
-          "startingLine": 349
+          "startingLine": 364
         }
       },
       {
@@ -199,7 +207,7 @@
         "key": "Title",
         "location": {
           "startingColumn": 27,
-          "startingLine": 354
+          "startingLine": 369
         }
       },
       {
@@ -207,7 +215,7 @@
         "key": "Description",
         "location": {
           "startingColumn": 27,
-          "startingLine": 355
+          "startingLine": 370
         }
       },
       {
@@ -215,7 +223,7 @@
         "key": "Quantitative",
         "location": {
           "startingColumn": 24,
-          "startingLine": 356
+          "startingLine": 371
         }
       },
       {
@@ -223,7 +231,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 24,
-          "startingLine": 363
+          "startingLine": 378
         }
       },
       {
@@ -231,7 +239,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 24,
-          "startingLine": 367
+          "startingLine": 382
         }
       }
     ]

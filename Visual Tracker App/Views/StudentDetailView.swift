@@ -13,12 +13,13 @@ struct StudentDetailView: View {
     @State private var showingAddSheet: Bool = false
     @State private var studentPendingDelete: Student?
 
-    @State private var editingCategoryTarget: CategoryEditTarget?
     @State private var isExportingData: Bool = false
     @State private var showingExportSuccess: Bool = false
     @State private var showingExportError: Bool = false
     @State private var exportSuccessMessage: String = ""
     @State private var exportErrorMessage: String = ""
+    @State private var showingManageSuccessCriteria: Bool = false
+    @State private var showingManageMilestones: Bool = false
 
     private var students: [Student] { store.students }
     private var allObjectives: [LearningObjective] { store.learningObjectives }
@@ -253,11 +254,11 @@ struct StudentDetailView: View {
                 )
             }
         }
-        .sheet(item: $editingCategoryTarget) { target in
-            EditCategoryTitleSheet(
-                code: target.code,
-                fallbackTitle: target.fallbackTitle
-            )
+        .sheet(isPresented: $showingManageSuccessCriteria) {
+            ManageSuccessCriteriaSheet()
+        }
+        .sheet(isPresented: $showingManageMilestones) {
+            ManageMilestonesSheet()
         }
         .confirmationDialog(
             "Delete Student",
@@ -481,8 +482,12 @@ struct StudentDetailView: View {
         )
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Edit Title...") {
-                editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
+            Button("Manage Success Criteria…") {
+                showingManageSuccessCriteria = true
+            }
+
+            Button("Manage Milestones…") {
+                showingManageMilestones = true
             }
         }
     }
@@ -934,18 +939,6 @@ struct StudentDetailView: View {
             return label.title
         }
         return canonical.isEmpty ? objective.code : objective.title
-    }
-
-    private struct CategoryEditTarget: Identifiable {
-        let id: String
-        let code: String
-        let fallbackTitle: String
-
-        init(code: String, fallbackTitle: String) {
-            self.id = code
-            self.code = code
-            self.fallbackTitle = fallbackTitle
-        }
     }
 
     private enum DisplayMode {

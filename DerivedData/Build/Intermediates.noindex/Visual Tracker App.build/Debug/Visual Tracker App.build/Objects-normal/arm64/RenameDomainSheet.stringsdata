@@ -12,7 +12,7 @@
       },
       {
         "comment": "",
-        "key": "Rename Domain",
+        "key": "Rename Expertise Check",
         "location": {
           "startingColumn": 18,
           "startingLine": 20
@@ -20,7 +20,7 @@
       },
       {
         "comment": "",
-        "key": "Domain Name",
+        "key": "Expertise Check Name",
         "location": {
           "startingColumn": 27,
           "startingLine": 25

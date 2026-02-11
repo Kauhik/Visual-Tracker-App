@@ -25,8 +25,6 @@ struct StudentOverviewBoard: View {
     @State private var showingRenameError: Bool = false
     @State private var renameErrorMessage: String = ""
 
-    @State private var editingCategoryTarget: CategoryEditTarget?
-
     private var students: [Student] { store.students }
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
@@ -180,12 +178,6 @@ struct StudentOverviewBoard: View {
         }
         .sheet(isPresented: $showingManageMilestones) {
             ManageMilestonesSheet()
-        }
-        .sheet(item: $editingCategoryTarget) { target in
-            EditCategoryTitleSheet(
-                code: target.code,
-                fallbackTitle: target.fallbackTitle
-            )
         }
         .confirmationDialog(
             "Delete Student",
@@ -427,8 +419,12 @@ struct StudentOverviewBoard: View {
                 .help(categoryDisplayTitle(for: category))
                 .layoutPriority(1)
                 .contextMenu {
-                    Button("Edit Title...") {
-                        editingCategoryTarget = CategoryEditTarget(code: category.code, fallbackTitle: category.title)
+                    Button("Manage Success Criteria…") {
+                        showingManageSuccessCriteria = true
+                    }
+
+                    Button("Manage Milestones…") {
+                        showingManageMilestones = true
                     }
                 }
 
@@ -574,18 +570,6 @@ struct StudentOverviewBoard: View {
             return studentGroups[0].name
         }
         return "\(studentGroups[0].name) +\(studentGroups.count - 1)"
-    }
-
-    private struct CategoryEditTarget: Identifiable {
-        let id: String
-        let code: String
-        let fallbackTitle: String
-
-        init(code: String, fallbackTitle: String) {
-            self.id = code
-            self.code = code
-            self.fallbackTitle = fallbackTitle
-        }
     }
 
 }

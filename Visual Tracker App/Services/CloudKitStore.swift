@@ -713,6 +713,13 @@ final class CloudKitStore: ObservableObject {
 
     func updateCategoryLabel(code: String, title: String) async {
         lastErrorMessage = nil
+        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedCode.isEmpty == false else { return }
+        // Success Criteria (root categories) titles are read-only from UI pathways.
+        if objectiveByCode(normalizedCode)?.isRootCategory == true {
+            return
+        }
+
         guard await requireWriteAccess() else { return }
         guard let cohortRecordID else {
             await reloadAllData()
@@ -721,19 +728,19 @@ final class CloudKitStore: ObservableObject {
 
         let label: CategoryLabel
         let isNewLabel: Bool
-        if let existing = categoryLabels.first(where: { $0.key == code }) {
+        if let existing = categoryLabels.first(where: { $0.key == normalizedCode }) {
             label = existing
             isNewLabel = false
             label.title = title
         } else {
-            label = CategoryLabel(code: code, title: title)
+            label = CategoryLabel(code: normalizedCode, title: title)
             isNewLabel = true
             categoryLabels.append(label)
-            pendingCategoryLabelCreateKeys.insert(code)
+            pendingCategoryLabelCreateKeys.insert(normalizedCode)
         }
         categoryLabels.sort { $0.key < $1.key }
 
-        let recordID = CKRecord.ID(recordName: code)
+        let recordID = CKRecord.ID(recordName: normalizedCode)
         if isNewLabel {
             unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
         }
@@ -747,12 +754,12 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await service.save(record: record)
-            pendingCategoryLabelCreateKeys.remove(code)
+            pendingCategoryLabelCreateKeys.remove(normalizedCode)
             unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
             markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
-            pendingCategoryLabelCreateKeys.remove(code)
+            pendingCategoryLabelCreateKeys.remove(normalizedCode)
             unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
             lastErrorMessage = "Failed to update category label: \(error.localizedDescription)"
         }

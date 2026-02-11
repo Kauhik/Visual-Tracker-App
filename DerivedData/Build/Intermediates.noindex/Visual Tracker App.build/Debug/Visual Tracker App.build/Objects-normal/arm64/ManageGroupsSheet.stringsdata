@@ -124,10 +124,18 @@
       },
       {
         "comment": "",
+        "key": "Saving...",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
         "key": "%lld%%",
         "location": {
           "startingColumn": 22,
-          "startingLine": 155
+          "startingLine": 165
         }
       },
       {
@@ -135,7 +143,7 @@
         "key": "Group average",
         "location": {
           "startingColumn": 22,
-          "startingLine": 159
+          "startingLine": 169
         }
       }
     ]

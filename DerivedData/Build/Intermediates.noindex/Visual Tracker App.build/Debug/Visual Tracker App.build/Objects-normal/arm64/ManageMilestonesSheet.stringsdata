@@ -159,6 +159,14 @@
         "key": "Quant",
         "location": {
           "startingColumn": 22,
+          "startingLine": 222
+        }
+      },
+      {
+        "comment": "",
+        "key": "Saving...",
+        "location": {
+          "startingColumn": 30,
           "startingLine": 212
         }
       },
@@ -167,7 +175,7 @@
         "key": "Edit",
         "location": {
           "startingColumn": 20,
-          "startingLine": 244
+          "startingLine": 254
         }
       },
       {
@@ -175,7 +183,7 @@
         "key": "Archive",
         "location": {
           "startingColumn": 20,
-          "startingLine": 250
+          "startingLine": 260
         }
       },
       {
@@ -183,7 +191,7 @@
         "key": "Edit Milestone",
         "location": {
           "startingColumn": 18,
-          "startingLine": 485
+          "startingLine": 499
         }
       },
       {
@@ -191,7 +199,7 @@
         "key": "Code",
         "location": {
           "startingColumn": 27,
-          "startingLine": 490
+          "startingLine": 504
         }
       },
       {
@@ -199,7 +207,7 @@
         "key": "Title",
         "location": {
           "startingColumn": 27,
-          "startingLine": 491
+          "startingLine": 505
         }
       },
       {
@@ -207,7 +215,7 @@
         "key": "Description",
         "location": {
           "startingColumn": 27,
-          "startingLine": 492
+          "startingLine": 506
         }
       },
       {
@@ -215,7 +223,7 @@
         "key": "Parent Success Criterion",
         "location": {
           "startingColumn": 24,
-          "startingLine": 494
+          "startingLine": 508
         }
       },
       {
@@ -223,7 +231,7 @@
         "key": "Quantitative",
         "location": {
           "startingColumn": 24,
-          "startingLine": 501
+          "startingLine": 515
         }
       },
       {
@@ -231,7 +239,7 @@
         "key": "None",
         "location": {
           "startingColumn": 26,
-          "startingLine": 495
+          "startingLine": 509
         }
       },
       {
@@ -239,7 +247,7 @@
         "key": "%@ - %@",
         "location": {
           "startingColumn": 30,
-          "startingLine": 497
+          "startingLine": 511
         }
       },
       {
@@ -247,7 +255,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 24,
-          "startingLine": 508
+          "startingLine": 522
         }
       },
       {
@@ -255,7 +263,7 @@
         "key": "Save",
         "location": {
           "startingColumn": 24,
-          "startingLine": 512
+          "startingLine": 526
         }
       }
     ]

@@ -4,18 +4,26 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "Edit Title...",
+        "key": "%lld%%",
         "location": {
-          "startingColumn": 36,
-          "startingLine": 89
+          "startingColumn": 30,
+          "startingLine": 75
         }
       },
       {
         "comment": "",
-        "key": "%lld%%",
+        "key": "Collapse",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 103
+          "startingColumn": 37,
+          "startingLine": 94
+        }
+      },
+      {
+        "comment": "",
+        "key": "Expand",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 94
         }
       }
     ]

@@ -7,7 +7,7 @@
         "key": "Validation Error",
         "location": {
           "startingColumn": 16,
-          "startingLine": 161
+          "startingLine": 202
         }
       },
       {
@@ -20,42 +20,50 @@
       },
       {
         "comment": "",
-        "key": "Group",
-        "location": {
-          "startingColumn": 28,
-          "startingLine": 79
-        }
-      },
-      {
-        "comment": "",
         "key": "Session",
         "location": {
           "startingColumn": 28,
-          "startingLine": 89
+          "startingLine": 130
         }
       },
       {
         "comment": "",
-        "key": "Domain",
+        "key": "Expertise Check",
         "location": {
           "startingColumn": 28,
-          "startingLine": 95
+          "startingLine": 136
         }
       },
       {
         "comment": "",
-        "key": "Ungrouped",
+        "key": "No groups available",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 80
-        }
-      },
-      {
-        "comment": "",
-        "key": "No Domain",
-        "location": {
-          "startingColumn": 30,
+          "startingColumn": 34,
           "startingLine": 96
+        }
+      },
+      {
+        "comment": "",
+        "key": "Groups",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 81
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clear",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 88
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Expertise Check",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 137
         }
       },
       {
@@ -63,7 +71,7 @@
         "key": "No custom properties",
         "location": {
           "startingColumn": 30,
-          "startingLine": 108
+          "startingLine": 149
         }
       },
       {
@@ -71,7 +79,7 @@
         "key": "Key",
         "location": {
           "startingColumn": 43,
-          "startingLine": 114
+          "startingLine": 155
         }
       },
       {
@@ -79,7 +87,7 @@
         "key": "Value",
         "location": {
           "startingColumn": 43,
-          "startingLine": 118
+          "startingLine": 159
         }
       },
       {
@@ -87,7 +95,7 @@
         "key": "Add Property",
         "location": {
           "startingColumn": 31,
-          "startingLine": 135
+          "startingLine": 176
         }
       },
       {
@@ -95,7 +103,7 @@
         "key": "Custom Properties",
         "location": {
           "startingColumn": 26,
-          "startingLine": 138
+          "startingLine": 179
         }
       },
       {
@@ -103,7 +111,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 24,
-          "startingLine": 146
+          "startingLine": 187
         }
       },
       {
@@ -111,7 +119,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 162
+          "startingLine": 203
         }
       }
     ]
