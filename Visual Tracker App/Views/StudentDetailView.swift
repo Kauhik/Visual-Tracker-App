@@ -38,9 +38,7 @@ struct StudentDetailView: View {
     }
 
     private var rootCategories: [LearningObjective] {
-        allObjectives
-            .filter { $0.isRootCategory && $0.isArchived == false }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        store.rootCategoryObjectives()
     }
 
     private var ungroupedStudents: [Student] {
@@ -133,29 +131,19 @@ struct StudentDetailView: View {
     private var scopeOverallProgress: Int {
         switch selectedScope {
         case .overall:
-            return ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
+            return store.cohortOverallProgress(students: students)
         case .ungrouped:
-            return ProgressCalculator.cohortOverall(students: ungroupedStudents, allObjectives: allObjectives)
+            return store.cohortOverallProgress(students: ungroupedStudents)
         case .group(let id):
             if let group = groups.first(where: { $0.id == id }) {
-                return ProgressCalculator.groupOverall(
-                    group: group,
-                    students: students,
-                    memberships: store.memberships,
-                    allObjectives: allObjectives
-                )
+                return store.groupOverallProgress(group: group, students: students)
             }
             if let group = selectedGroup {
-                return ProgressCalculator.groupOverall(
-                    group: group,
-                    students: students,
-                    memberships: store.memberships,
-                    allObjectives: allObjectives
-                )
+                return store.groupOverallProgress(group: group, students: students)
             }
-            return ProgressCalculator.cohortOverall(students: filteredStudents, allObjectives: allObjectives)
+            return store.cohortOverallProgress(students: filteredStudents)
         case .domain, .noDomain:
-            return ProgressCalculator.cohortOverall(students: filteredStudents, allObjectives: allObjectives)
+            return store.cohortOverallProgress(students: filteredStudents)
         }
     }
 
@@ -180,7 +168,7 @@ struct StudentDetailView: View {
     private var headerOverallProgress: Int {
         switch displayMode {
         case .student(let student):
-            return ProgressCalculator.studentOverall(student: student, allObjectives: allObjectives)
+            return store.studentOverallProgress(student: student)
         case .overview:
             return scopeOverallProgress
         }
@@ -444,17 +432,9 @@ struct StudentDetailView: View {
 
         switch displayMode {
         case .student(let student):
-            value = ProgressCalculator.objectivePercentage(
-                student: student,
-                objective: category,
-                allObjectives: allObjectives
-            )
+            value = store.objectivePercentage(student: student, objective: category)
         case .overview:
-            value = ProgressCalculator.cohortObjectiveAverage(
-                objective: category,
-                students: breakdownStudents,
-                allObjectives: allObjectives
-            )
+            value = store.cohortObjectiveAverage(objective: category, students: breakdownStudents)
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
@@ -594,7 +574,7 @@ struct StudentDetailView: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: zoomManager.scaled(12)) {
                         ForEach(boardStudents) { boardStudent in
-                            let overall = ProgressCalculator.studentOverall(student: boardStudent, allObjectives: allObjectives)
+                            let overall = store.studentOverallProgress(student: boardStudent)
 
                             StudentCardView(
                                 student: boardStudent,

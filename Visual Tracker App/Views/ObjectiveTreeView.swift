@@ -13,12 +13,11 @@ struct ObjectiveTreeView: View {
     let allObjectives: [LearningObjective]
     let startIndentLevel: Int
 
+    @EnvironmentObject private var store: CloudKitStore
     @Environment(ZoomManager.self) private var zoomManager
     
     private var childObjectives: [LearningObjective] {
-        return allObjectives
-            .filter { $0.isChild(of: rootObjective) && $0.isArchived == false }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        store.childObjectives(of: rootObjective)
     }
     
     var body: some View {

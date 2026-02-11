@@ -50,9 +50,17 @@ final class CloudKitStore: ObservableObject {
     private var unconfirmedDomainRecordNames: Set<String> = []
     private var unconfirmedLearningObjectiveRecordNames: Set<String> = []
     private var unconfirmedCategoryLabelRecordNames: Set<String> = []
+    private var recentLocalWriteRecordKeys: [String: Date] = [:]
+    private let reconcileDeletionGraceInterval: TimeInterval = 120
     private var objectiveRefMigrationRecordNames: Set<String> = []
     private var isSeedingLearningObjectives: Bool = false
     private var isMigratingLegacyMemberships: Bool = false
+    private var rootCategoryObjectivesCache: [LearningObjective] = []
+    private var objectiveChildrenByParentID: [UUID: [LearningObjective]] = [:]
+    private var objectiveByCodeCache: [String: LearningObjective] = [:]
+    private var groupsByStudentIDCache: [UUID: [CohortGroup]] = [:]
+    private var progressValuesByStudentObjectiveID: [UUID: [UUID: Int]] = [:]
+    private var progressValuesByStudentObjectiveCode: [UUID: [String: Int]] = [:]
 
     private var syncCoordinator: CloudKitSyncCoordinator?
     private var lastSyncDateDefaultsKey: String { "VisualTrackerApp.lastSyncDate.\(cohortId)" }
@@ -90,6 +98,7 @@ final class CloudKitStore: ObservableObject {
                 CategoryLabel(code: "A", title: "Able to apply 100% of core LOs for chosen path")
             ]
             setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
+            rebuildAllDerivedCaches()
             hasLoaded = true
         }
     }
@@ -121,6 +130,7 @@ final class CloudKitStore: ObservableObject {
         unconfirmedDomainRecordNames.removeAll()
         unconfirmedLearningObjectiveRecordNames.removeAll()
         unconfirmedCategoryLabelRecordNames.removeAll()
+        recentLocalWriteRecordKeys.removeAll()
 
         do {
             let status = try await service.accountStatus()
@@ -195,6 +205,7 @@ final class CloudKitStore: ObservableObject {
                 setLearningObjectives(mappedLearningObjectives)
             }
             refreshLegacyGroupConvenience()
+            rebuildAllDerivedCaches()
 
             progressLoadedStudentIDs.removeAll()
             customPropertiesLoadedStudentIDs.removeAll()
@@ -237,6 +248,7 @@ final class CloudKitStore: ObservableObject {
         let recordID = CKRecord.ID(recordName: group.id.uuidString)
         groupRecordNameByID[group.id] = recordID.recordName
         unconfirmedGroupRecordNames.insert(recordID.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: recordID.recordName)
 
         let record = CKRecord(recordType: RecordType.cohortGroup, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
@@ -250,6 +262,7 @@ final class CloudKitStore: ObservableObject {
             pendingGroupCreateIDs.remove(group.id)
             unconfirmedGroupRecordNames.remove(recordID.recordName)
             unconfirmedGroupRecordNames.insert(saved.recordID.recordName)
+            markRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: saved.recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
             pendingGroupCreateIDs.remove(group.id)
@@ -267,9 +280,11 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await saveGroupRecord(group)
+            rebuildGroupMembershipCaches()
         } catch {
             group.name = previousName
             groups.sort { $0.name < $1.name }
+            rebuildGroupMembershipCaches()
             lastErrorMessage = "Failed to rename group: \(error.localizedDescription)"
         }
     }
@@ -287,6 +302,7 @@ final class CloudKitStore: ObservableObject {
         let affected = students.filter { affectedStudentIDs.contains($0.id) || $0.group?.id == group.id }
 
         groups.removeAll { $0.id == group.id }
+        rebuildGroupMembershipCaches()
 
         do {
             try await deleteMemberships(forGroupID: group.id)
@@ -318,6 +334,7 @@ final class CloudKitStore: ObservableObject {
         let recordID = CKRecord.ID(recordName: domain.id.uuidString)
         domainRecordNameByID[domain.id] = recordID.recordName
         unconfirmedDomainRecordNames.insert(recordID.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
 
         let record = CKRecord(recordType: RecordType.domain, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
@@ -331,6 +348,7 @@ final class CloudKitStore: ObservableObject {
             pendingDomainCreateIDs.remove(domain.id)
             unconfirmedDomainRecordNames.remove(recordID.recordName)
             unconfirmedDomainRecordNames.insert(saved.recordID.recordName)
+            markRecordRecentlyWritten(recordType: RecordType.domain, recordName: saved.recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
             pendingDomainCreateIDs.remove(domain.id)
@@ -409,9 +427,11 @@ final class CloudKitStore: ObservableObject {
         let student = Student(name: name, group: group, session: session, domain: domain)
         students.append(student)
         students.sort { $0.createdAt < $1.createdAt }
+        rebuildProgressCaches()
 
         let recordID = CKRecord.ID(recordName: student.id.uuidString)
         studentRecordNameByID[student.id] = recordID.recordName
+        markRecordRecentlyWritten(recordType: RecordType.student, recordName: recordID.recordName)
 
         let record = CKRecord(recordType: RecordType.student, recordID: recordID)
         applyStudentFields(student, to: record, cohortRecordID: cohortRecordID)
@@ -419,6 +439,7 @@ final class CloudKitStore: ObservableObject {
         do {
             let saved = try await service.save(record: record)
             studentRecordNameByID[student.id] = saved.recordID.recordName
+            markRecordRecentlyWritten(recordType: RecordType.student, recordName: saved.recordID.recordName)
 
             if customProperties.isEmpty == false {
                 try await replaceCustomProperties(for: student, rows: customProperties)
@@ -427,6 +448,7 @@ final class CloudKitStore: ObservableObject {
                 try await setGroupsInternal(for: student, groups: [group], updateLegacyGroupField: false)
             }
 
+            syncCoordinator?.noteLocalWrite()
             return student
         } catch {
             students.removeAll { $0.id == student.id }
@@ -502,6 +524,8 @@ final class CloudKitStore: ObservableObject {
         let recordID = recordID(for: student, lookup: studentRecordNameByID)
 
         students.removeAll { $0.id == student.id }
+        rebuildProgressCaches()
+        rebuildGroupMembershipCaches()
 
         do {
             try await service.delete(recordID: recordID)
@@ -516,18 +540,14 @@ final class CloudKitStore: ObservableObject {
     }
 
     func groups(for student: Student) -> [CohortGroup] {
-        let explicitGroups = memberships.compactMap { membership -> CohortGroup? in
-            guard membership.student?.id == student.id else { return nil }
-            return membership.group
-        }
-        let uniqueByID = Dictionary(grouping: explicitGroups, by: \.id).compactMap { $0.value.first }
-        if uniqueByID.isEmpty {
+        let explicitGroups = groupsByStudentIDCache[student.id] ?? []
+        if explicitGroups.isEmpty {
             if let legacyGroup = student.group {
                 return [legacyGroup]
             }
             return []
         }
-        return uniqueByID.sorted { $0.name < $1.name }
+        return explicitGroups
     }
 
     func primaryGroup(for student: Student) -> CohortGroup? {
@@ -537,7 +557,11 @@ final class CloudKitStore: ObservableObject {
     }
 
     func isUngrouped(student: Student) -> Bool {
-        groups(for: student).isEmpty
+        let explicitGroups = groupsByStudentIDCache[student.id] ?? []
+        if explicitGroups.isEmpty == false {
+            return false
+        }
+        return student.group == nil
     }
 
     func setGroups(
@@ -713,6 +737,7 @@ final class CloudKitStore: ObservableObject {
         if isNewLabel {
             unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
         }
+        markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.categoryLabel, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.key] = label.key
@@ -723,7 +748,8 @@ final class CloudKitStore: ObservableObject {
         do {
             try await service.save(record: record)
             pendingCategoryLabelCreateKeys.remove(code)
-            unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
+            unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
+            markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
             pendingCategoryLabelCreateKeys.remove(code)
@@ -746,6 +772,7 @@ final class CloudKitStore: ObservableObject {
             student.progressRecords = mapped.sorted { $0.objectiveCode < $1.objectiveCode }
             progressLoadedStudentIDs.insert(student.id)
             scheduleObjectiveRefMigrationIfNeeded(records: records, studentRecordID: studentRecordID)
+            rebuildProgressCaches()
         } catch {
             lastErrorMessage = "Failed to load progress: \(error.localizedDescription)"
         }
@@ -812,8 +839,10 @@ final class CloudKitStore: ObservableObject {
             }
             progressRecordNameByID.removeValue(forKey: duplicate.id)
         }
+        rebuildProgressCaches()
 
         let progressRecordID = recordID(for: progress, lookup: progressRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: progressRecordID.recordName)
         let record = CKRecord(recordType: RecordType.objectiveProgress, recordID: progressRecordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
@@ -837,6 +866,8 @@ final class CloudKitStore: ObservableObject {
             let saved = try await service.save(record: record)
             progressRecordNameByID[progress.id] = saved.recordID.recordName
             progressLoadedStudentIDs.insert(student.id)
+            markRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: saved.recordID.recordName)
+            rebuildProgressCaches()
         } catch {
             lastErrorMessage = "Failed to save progress: \(error.localizedDescription)"
         }
@@ -981,6 +1012,7 @@ final class CloudKitStore: ObservableObject {
     private func saveGroupRecord(_ group: CohortGroup) async throws {
         guard let cohortRecordID else { return }
         let recordID = recordID(for: group, lookup: groupRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.cohortGroup, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.name] = group.name
@@ -990,12 +1022,15 @@ final class CloudKitStore: ObservableObject {
         groupRecordNameByID[group.id] = saved.recordID.recordName
         pendingGroupCreateIDs.remove(group.id)
         unconfirmedGroupRecordNames.insert(saved.recordID.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
+        rebuildGroupMembershipCaches()
     }
 
     private func saveDomainRecord(_ domain: Domain) async throws {
         guard let cohortRecordID else { return }
         let recordID = recordID(for: domain, lookup: domainRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.domain, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.name] = domain.name
@@ -1005,16 +1040,19 @@ final class CloudKitStore: ObservableObject {
         domainRecordNameByID[domain.id] = saved.recordID.recordName
         pendingDomainCreateIDs.remove(domain.id)
         unconfirmedDomainRecordNames.insert(saved.recordID.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.domain, recordName: saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
     private func saveStudentRecord(_ student: Student) async throws {
         guard let cohortRecordID else { return }
         let recordID = recordID(for: student, lookup: studentRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.student, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.student, recordID: recordID)
         applyStudentFields(student, to: record, cohortRecordID: cohortRecordID)
         let saved = try await service.save(record: record)
         studentRecordNameByID[student.id] = saved.recordID.recordName
+        markRecordRecentlyWritten(recordType: RecordType.student, recordName: saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1024,6 +1062,10 @@ final class CloudKitStore: ObservableObject {
     ) async throws {
         guard let cohortRecordID else { return }
         let learningObjectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+        markRecordRecentlyWritten(
+            recordType: RecordType.learningObjective,
+            recordName: learningObjectiveRecordID.recordName
+        )
         let record = CKRecord(recordType: RecordType.learningObjective, recordID: learningObjectiveRecordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.code] = objective.code
@@ -1050,6 +1092,7 @@ final class CloudKitStore: ObservableObject {
         learningObjectiveRecordNameByID[objective.id] = saved.recordID.recordName
         pendingLearningObjectiveCreateIDs.remove(objective.id)
         unconfirmedLearningObjectiveRecordNames.insert(saved.recordID.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.learningObjective, recordName: saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1101,6 +1144,7 @@ final class CloudKitStore: ObservableObject {
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
 
         let recordID = recordID(for: property, lookup: customPropertyRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.studentCustomProperty, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.studentCustomProperty, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.student] = CKRecord.Reference(recordID: studentRecordID, action: .none)
@@ -1111,6 +1155,7 @@ final class CloudKitStore: ObservableObject {
 
         let saved = try await service.save(record: record)
         customPropertyRecordNameByID[property.id] = saved.recordID.recordName
+        markRecordRecentlyWritten(recordType: RecordType.studentCustomProperty, recordName: saved.recordID.recordName)
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1346,6 +1391,7 @@ final class CloudKitStore: ObservableObject {
             }
         }
         learningObjectives = allLearningObjectives.filter { $0.isArchived == false }
+        rebuildObjectiveCaches()
     }
 
     private func defaultLearningObjectivesWithResolvedParents() -> [LearningObjective] {
@@ -1373,7 +1419,7 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func objectiveByCode(_ code: String) -> LearningObjective? {
-        allLearningObjectives.first { $0.code == code }
+        objectiveByCodeCache[code]
     }
 
     private func objectiveByID(_ id: UUID) -> LearningObjective? {
@@ -1433,6 +1479,69 @@ final class CloudKitStore: ObservableObject {
         ?? (record[Field.student] as? CKRecord.Reference)
     }
 
+    func rootCategoryObjectives() -> [LearningObjective] {
+        rootCategoryObjectivesCache
+    }
+
+    func childObjectives(of objective: LearningObjective) -> [LearningObjective] {
+        objectiveChildrenByParentID[objective.id] ?? []
+    }
+
+    func objective(forCode code: String) -> LearningObjective? {
+        objectiveByCode(code)
+    }
+
+    func progressValue(student: Student, objective: LearningObjective) -> Int {
+        if let value = progressValuesByStudentObjectiveID[student.id]?[objective.id] {
+            return value
+        }
+        return progressValuesByStudentObjectiveCode[student.id]?[objective.code] ?? 0
+    }
+
+    func objectivePercentage(student: Student, objective: LearningObjective) -> Int {
+        var memo: [UUID: Int] = [:]
+        return objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
+    }
+
+    func studentOverallProgress(student: Student) -> Int {
+        guard rootCategoryObjectivesCache.isEmpty == false else { return 0 }
+        var memo: [UUID: Int] = [:]
+        var total = 0
+        for category in rootCategoryObjectivesCache {
+            total += objectivePercentage(studentID: student.id, objective: category, memo: &memo)
+        }
+        return total / rootCategoryObjectivesCache.count
+    }
+
+    func cohortObjectiveAverage(objective: LearningObjective, students: [Student]) -> Int {
+        guard students.isEmpty == false else { return 0 }
+        var total = 0
+        for student in students {
+            var memo: [UUID: Int] = [:]
+            total += objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
+        }
+        return total / students.count
+    }
+
+    func cohortOverallProgress(students: [Student]) -> Int {
+        guard students.isEmpty == false else { return 0 }
+        var total = 0
+        for student in students {
+            total += studentOverallProgress(student: student)
+        }
+        return total / students.count
+    }
+
+    func groupOverallProgress(group: CohortGroup, students: [Student]) -> Int {
+        let groupStudents = students.filter { student in
+            if let explicitGroups = groupsByStudentIDCache[student.id], explicitGroups.isEmpty == false {
+                return explicitGroups.contains(where: { $0.id == group.id })
+            }
+            return student.group?.id == group.id
+        }
+        return cohortOverallProgress(students: groupStudents)
+    }
+
     private func uniqueMemberships(_ input: [StudentGroupMembership]) -> [StudentGroupMembership] {
         var seen: Set<String> = []
         var output: [StudentGroupMembership] = []
@@ -1446,7 +1555,10 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func explicitGroups(for student: Student) -> [CohortGroup] {
-        memberships.compactMap { membership -> CohortGroup? in
+        if let cached = groupsByStudentIDCache[student.id] {
+            return cached
+        }
+        return memberships.compactMap { membership -> CohortGroup? in
             guard membership.student?.id == student.id else { return nil }
             return membership.group
         }
@@ -1507,6 +1619,7 @@ final class CloudKitStore: ObservableObject {
         let membership = StudentGroupMembership(student: student, group: group)
         memberships.append(membership)
         memberships = uniqueMemberships(memberships)
+        rebuildGroupMembershipCaches()
 
         try await saveMembershipRecord(membership, student: student, group: group)
 
@@ -1543,6 +1656,7 @@ final class CloudKitStore: ObservableObject {
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
         let groupRecordID = recordID(for: group, lookup: groupRecordNameByID)
         let recordID = recordID(for: membership, lookup: membershipRecordNameByID)
+        markRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: recordID.recordName)
         let record = CKRecord(recordType: RecordType.studentGroupMembership, recordID: recordID)
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.studentRef] = CKRecord.Reference(recordID: studentRecordID, action: .none)
@@ -1552,6 +1666,8 @@ final class CloudKitStore: ObservableObject {
         let saved = try await service.save(record: record)
         membership.updatedAt = Date()
         membershipRecordNameByID[membership.id] = saved.recordID.recordName
+        markRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: saved.recordID.recordName)
+        rebuildGroupMembershipCaches()
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1560,6 +1676,8 @@ final class CloudKitStore: ObservableObject {
         try await service.delete(recordID: recordID)
         memberships.removeAll { $0.id == membership.id }
         membershipRecordNameByID.removeValue(forKey: membership.id)
+        unmarkRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: recordID.recordName)
+        rebuildGroupMembershipCaches()
         syncCoordinator?.noteLocalWrite()
     }
 
@@ -1797,6 +1915,7 @@ final class CloudKitStore: ObservableObject {
         for student in students {
             student.progressRecords.removeAll()
         }
+        rebuildProgressCaches()
     }
 
     private func clearLocalCustomPropertyState() {
@@ -1811,6 +1930,7 @@ final class CloudKitStore: ObservableObject {
         memberships.removeAll()
         membershipRecordNameByID.removeAll()
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
     }
 
     private func clearLocalStudentState() {
@@ -1823,6 +1943,8 @@ final class CloudKitStore: ObservableObject {
         membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
         customPropertyRecordNameByID.removeAll()
+        rebuildGroupMembershipCaches()
+        rebuildProgressCaches()
     }
 
     private func clearLocalGroupState() {
@@ -1831,6 +1953,7 @@ final class CloudKitStore: ObservableObject {
         pendingGroupCreateIDs.removeAll()
         unconfirmedGroupRecordNames.removeAll()
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
     }
 
     private func clearLocalCategoryLabelState() {
@@ -1880,6 +2003,156 @@ final class CloudKitStore: ObservableObject {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private func rebuildAllDerivedCaches() {
+        rebuildGroupMembershipCaches()
+        rebuildObjectiveCaches()
+        rebuildProgressCaches()
+    }
+
+    private func rebuildGroupMembershipCaches() {
+        let groupByID = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
+        var groupIDsByStudentID: [UUID: Set<UUID>] = [:]
+
+        for membership in memberships {
+            guard let studentID = membership.student?.id,
+                  let groupID = membership.group?.id,
+                  groupByID[groupID] != nil else {
+                continue
+            }
+            groupIDsByStudentID[studentID, default: []].insert(groupID)
+        }
+
+        var rebuilt: [UUID: [CohortGroup]] = [:]
+        for (studentID, groupIDs) in groupIDsByStudentID {
+            let groups = groupIDs.compactMap { groupByID[$0] }.sorted { $0.name < $1.name }
+            rebuilt[studentID] = groups
+        }
+        groupsByStudentIDCache = rebuilt
+    }
+
+    private func rebuildObjectiveCaches() {
+        objectiveByCodeCache = Dictionary(uniqueKeysWithValues: allLearningObjectives.map { ($0.code, $0) })
+
+        let activeObjectives = learningObjectives
+
+        let objectiveByID = Dictionary(uniqueKeysWithValues: activeObjectives.map { ($0.id, $0) })
+        let objectiveByCode = Dictionary(uniqueKeysWithValues: activeObjectives.map { ($0.code, $0) })
+
+        var childrenByParent: [UUID: [LearningObjective]] = [:]
+        var roots: [LearningObjective] = []
+
+        for objective in activeObjectives {
+            if let parentID = objective.parentId, objectiveByID[parentID] != nil {
+                childrenByParent[parentID, default: []].append(objective)
+                continue
+            }
+            if let parentCode = objective.parentCode,
+               let parent = objectiveByCode[parentCode] {
+                childrenByParent[parent.id, default: []].append(objective)
+                continue
+            }
+            if objective.isRootCategory {
+                roots.append(objective)
+            }
+        }
+
+        for (parentID, children) in childrenByParent {
+            childrenByParent[parentID] = children.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.code < $1.code
+            }
+        }
+
+        rootCategoryObjectivesCache = roots.sorted {
+            if $0.sortOrder != $1.sortOrder {
+                return $0.sortOrder < $1.sortOrder
+            }
+            return $0.code < $1.code
+        }
+        objectiveChildrenByParentID = childrenByParent
+    }
+
+    private func rebuildProgressCaches() {
+        var byStudentObjectiveID: [UUID: [UUID: Int]] = [:]
+        var byStudentObjectiveCode: [UUID: [String: Int]] = [:]
+
+        for student in students {
+            var objectiveIDValues: [UUID: Int] = [:]
+            var objectiveCodeValues: [String: Int] = [:]
+            for progress in student.progressRecords {
+                if let objectiveID = progress.objectiveId {
+                    objectiveIDValues[objectiveID] = progress.value
+                }
+                objectiveCodeValues[progress.objectiveCode] = progress.value
+            }
+            byStudentObjectiveID[student.id] = objectiveIDValues
+            byStudentObjectiveCode[student.id] = objectiveCodeValues
+        }
+
+        progressValuesByStudentObjectiveID = byStudentObjectiveID
+        progressValuesByStudentObjectiveCode = byStudentObjectiveCode
+    }
+
+    private func objectivePercentage(
+        studentID: UUID,
+        objective: LearningObjective,
+        memo: inout [UUID: Int]
+    ) -> Int {
+        if let cached = memo[objective.id] {
+            return cached
+        }
+
+        let children = objectiveChildrenByParentID[objective.id] ?? []
+        if children.isEmpty {
+            let value: Int
+            if let objectiveValue = progressValuesByStudentObjectiveID[studentID]?[objective.id] {
+                value = objectiveValue
+            } else {
+                value = progressValuesByStudentObjectiveCode[studentID]?[objective.code] ?? 0
+            }
+            memo[objective.id] = value
+            return value
+        }
+
+        var total = 0
+        for child in children {
+            total += objectivePercentage(studentID: studentID, objective: child, memo: &memo)
+        }
+        let value = total / children.count
+        memo[objective.id] = value
+        return value
+    }
+
+    private func recordProtectionKey(recordType: String, recordName: String) -> String {
+        "\(recordType)|\(recordName)"
+    }
+
+    private func markRecordRecentlyWritten(recordType: String, recordName: String) {
+        recentLocalWriteRecordKeys[recordProtectionKey(recordType: recordType, recordName: recordName)] = Date()
+    }
+
+    private func unmarkRecordRecentlyWritten(recordType: String, recordName: String) {
+        recentLocalWriteRecordKeys.removeValue(
+            forKey: recordProtectionKey(recordType: recordType, recordName: recordName)
+        )
+    }
+
+    private func isRecentlyWritten(recordType: String, recordName: String) -> Bool {
+        pruneExpiredRecentWriteMarkers()
+        let key = recordProtectionKey(recordType: recordType, recordName: recordName)
+        guard let date = recentLocalWriteRecordKeys[key] else { return false }
+        return Date().timeIntervalSince(date) < reconcileDeletionGraceInterval
+    }
+
+    private func pruneExpiredRecentWriteMarkers() {
+        let now = Date()
+        recentLocalWriteRecordKeys = recentLocalWriteRecordKeys.filter { _, timestamp in
+            now.timeIntervalSince(timestamp) < reconcileDeletionGraceInterval
+        }
+    }
+
     private func dictionaryByRecordName<T>(
         items: [T],
         recordNameLookup: [UUID: String]
@@ -1904,6 +2177,7 @@ final class CloudKitStore: ObservableObject {
         }
         groups.removeAll { fetchedByID[$0.id] == nil }
         groups.sort { $0.name < $1.name }
+        rebuildGroupMembershipCaches()
     }
 
     private func mergeFetchedDomains(_ fetched: [Domain]) {
@@ -1973,19 +2247,19 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Starting incremental sync. Last sync: \(previousSync, privacy: .public)")
 
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
-        let updatedAfter = previousSync as NSDate
+        let updatedAfter = previousSync.addingTimeInterval(-2) as NSDate
 
         do {
             // Keep group/domain instances stable by upserting in-place.
             // Note: We use 'updatedAt' (custom queryable field) instead of 'modificationDate' (system field not queryable)
-            let groupPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let domainPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let labelPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let objectivePredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let studentPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let membershipPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let progressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
-            let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt > %@", cohortRef, updatedAfter)
+            let groupPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let domainPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let labelPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let objectivePredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let studentPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let membershipPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let progressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
 
             async let groupsChanged = service.queryRecords(
                 ofType: RecordType.cohortGroup,
@@ -2164,6 +2438,7 @@ final class CloudKitStore: ObservableObject {
             let remoteGroupIDs = Set(remoteGroups.map { $0.recordID.recordName })
             let localGroupIDs = Set(groupRecordNameByID.values)
             for recordName in localGroupIDs.subtracting(remoteGroupIDs) {
+                guard isRecentlyWritten(recordType: RecordType.cohortGroup, recordName: recordName) == false else { continue }
                 guard unconfirmedGroupRecordNames.contains(recordName) == false else { continue }
                 deleteGroupByRecordID(CKRecord.ID(recordName: recordName))
             }
@@ -2171,6 +2446,7 @@ final class CloudKitStore: ObservableObject {
             let remoteDomainIDs = Set(remoteDomains.map { $0.recordID.recordName })
             let localDomainIDs = Set(domainRecordNameByID.values)
             for recordName in localDomainIDs.subtracting(remoteDomainIDs) {
+                guard isRecentlyWritten(recordType: RecordType.domain, recordName: recordName) == false else { continue }
                 guard unconfirmedDomainRecordNames.contains(recordName) == false else { continue }
                 deleteDomainByRecordID(CKRecord.ID(recordName: recordName))
             }
@@ -2178,12 +2454,14 @@ final class CloudKitStore: ObservableObject {
             let remoteStudentIDs = Set(remoteStudents.map { $0.recordID.recordName })
             let localStudentIDs = Set(studentRecordNameByID.values)
             for recordName in localStudentIDs.subtracting(remoteStudentIDs) {
+                guard isRecentlyWritten(recordType: RecordType.student, recordName: recordName) == false else { continue }
                 deleteStudentByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             let remoteObjectiveIDs = Set(remoteObjectives.map { $0.recordID.recordName })
             let localObjectiveIDs = Set(learningObjectiveRecordNameByID.values)
             for recordName in localObjectiveIDs.subtracting(remoteObjectiveIDs) {
+                guard isRecentlyWritten(recordType: RecordType.learningObjective, recordName: recordName) == false else { continue }
                 guard unconfirmedLearningObjectiveRecordNames.contains(recordName) == false else { continue }
                 deleteLearningObjectiveByRecordID(CKRecord.ID(recordName: recordName))
             }
@@ -2191,12 +2469,14 @@ final class CloudKitStore: ObservableObject {
             let remoteMembershipIDs = Set(remoteMemberships.map { $0.recordID.recordName })
             let localMembershipIDs = Set(membershipRecordNameByID.values)
             for recordName in localMembershipIDs.subtracting(remoteMembershipIDs) {
+                guard isRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: recordName) == false else { continue }
                 deleteMembershipByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             let remoteLabelIDs = Set(remoteLabels.map { $0.recordID.recordName })
             let localLabelIDs = Set(categoryLabels.map { $0.key })
             for key in localLabelIDs.subtracting(remoteLabelIDs) {
+                guard isRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key) == false else { continue }
                 guard unconfirmedCategoryLabelRecordNames.contains(key) == false else { continue }
                 deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
             }
@@ -2235,6 +2515,7 @@ final class CloudKitStore: ObservableObject {
             let localProgressIDs = Set(progressRecordNameByID.values)
             let deletedProgressIDs = localProgressIDs.subtracting(remoteProgressIDs)
             for recordName in deletedProgressIDs {
+                guard isRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: recordName) == false else { continue }
                 deleteProgressByRecordID(CKRecord.ID(recordName: recordName))
             }
         } catch {
@@ -2265,6 +2546,7 @@ final class CloudKitStore: ObservableObject {
             let localCustomPropIDs = Set(customPropertyRecordNameByID.values)
             let deletedCustomPropIDs = localCustomPropIDs.subtracting(remoteCustomPropIDs)
             for recordName in deletedCustomPropIDs {
+                guard isRecentlyWritten(recordType: RecordType.studentCustomProperty, recordName: recordName) == false else { continue }
                 deleteCustomPropertyByRecordID(CKRecord.ID(recordName: recordName))
             }
         } catch {
@@ -2325,9 +2607,11 @@ final class CloudKitStore: ObservableObject {
             groupRecordNameByID[uuid] = record.recordID.recordName
             pendingGroupCreateIDs.remove(uuid)
             unconfirmedGroupRecordNames.remove(record.recordID.recordName)
+            unmarkRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: record.recordID.recordName)
         }
 
         groups.sort { $0.name < $1.name }
+        rebuildGroupMembershipCaches()
     }
 
     private func applyDomainChanges(_ records: [CKRecord]) {
@@ -2379,6 +2663,7 @@ final class CloudKitStore: ObservableObject {
             }
             pendingCategoryLabelCreateKeys.remove(code)
             unconfirmedCategoryLabelRecordNames.remove(record.recordID.recordName)
+            unmarkRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: record.recordID.recordName)
         }
 
         categoryLabels.sort { $0.key < $1.key }
@@ -2410,6 +2695,7 @@ final class CloudKitStore: ObservableObject {
             )
             pendingLearningObjectiveCreateIDs.remove(objectiveID)
             unconfirmedLearningObjectiveRecordNames.remove(record.recordID.recordName)
+            unmarkRecordRecentlyWritten(recordType: RecordType.learningObjective, recordName: record.recordID.recordName)
         }
 
         let remapped = mapLearningObjectives(from: Array(mergedByRecordName.values))
@@ -2427,11 +2713,13 @@ final class CloudKitStore: ObservableObject {
             if let mapped = mapMembership(from: record, studentMap: studentMap, groupMap: groupMap) {
                 memberships.removeAll { $0.id == mapped.id }
                 memberships.append(mapped)
+                unmarkRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: record.recordID.recordName)
             }
         }
 
         memberships = uniqueMemberships(memberships)
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
     }
 
     private func applyStudentChanges(_ records: [CKRecord]) {
@@ -2486,10 +2774,13 @@ final class CloudKitStore: ObservableObject {
             }
 
             studentRecordNameByID[uuid] = record.recordID.recordName
+            unmarkRecordRecentlyWritten(recordType: RecordType.student, recordName: record.recordID.recordName)
         }
 
         students.sort { $0.createdAt < $1.createdAt }
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
+        rebuildProgressCaches()
         syncLogger.info("Students array now has \(self.students.count, privacy: .public) students")
     }
 
@@ -2575,7 +2866,9 @@ final class CloudKitStore: ObservableObject {
             progressRecordNameByID[uuid] = record.recordID.recordName
             student.progressRecords.sort { $0.objectiveCode < $1.objectiveCode }
             scheduleObjectiveRefMigrationIfNeeded(records: [record], studentRecordID: studentRef.recordID)
+            unmarkRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: record.recordID.recordName)
         }
+        rebuildProgressCaches()
     }
 
     private func applyCustomPropertyChanges(_ records: [CKRecord]) {
@@ -2625,6 +2918,7 @@ final class CloudKitStore: ObservableObject {
 
             customPropertyRecordNameByID[uuid] = record.recordID.recordName
             student.customProperties.sort { $0.sortOrder < $1.sortOrder }
+            unmarkRecordRecentlyWritten(recordType: RecordType.studentCustomProperty, recordName: record.recordID.recordName)
         }
     }
 
@@ -2634,12 +2928,14 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         groups.removeAll { $0.id == uuid }
         groupRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: recordID.recordName)
         pendingGroupCreateIDs.remove(uuid)
         unconfirmedGroupRecordNames.remove(recordID.recordName)
         memberships.removeAll { $0.group?.id == uuid }
         let remainingMembershipIDs = Set(memberships.map(\.id))
         membershipRecordNameByID = membershipRecordNameByID.filter { remainingMembershipIDs.contains($0.key) }
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
     }
 
     private func deleteDomainByRecordID(_ recordID: CKRecord.ID) {
@@ -2648,6 +2944,7 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         domains.removeAll { $0.id == uuid }
         domainRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
         pendingDomainCreateIDs.remove(uuid)
         unconfirmedDomainRecordNames.remove(recordID.recordName)
 
@@ -2662,11 +2959,14 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         students.removeAll { $0.id == uuid }
         studentRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.student, recordName: recordID.recordName)
         memberships.removeAll { $0.student?.id == uuid }
         let remainingMembershipIDs = Set(memberships.map(\.id))
         membershipRecordNameByID = membershipRecordNameByID.filter { remainingMembershipIDs.contains($0.key) }
         progressLoadedStudentIDs.remove(uuid)
         customPropertiesLoadedStudentIDs.remove(uuid)
+        rebuildGroupMembershipCaches()
+        rebuildProgressCaches()
     }
 
     private func deleteCategoryLabelByRecordID(_ recordID: CKRecord.ID) {
@@ -2674,6 +2974,7 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Deleting category label: \(key, privacy: .public)")
         objectWillChange.send()
         categoryLabels.removeAll { $0.key == key || $0.code == key }
+        unmarkRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key)
         pendingCategoryLabelCreateKeys.remove(key)
         unconfirmedCategoryLabelRecordNames.remove(key)
     }
@@ -2685,6 +2986,7 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         allLearningObjectives.removeAll { $0.id == objectiveID }
         learningObjectiveRecordNameByID.removeValue(forKey: objectiveID)
+        unmarkRecordRecentlyWritten(recordType: RecordType.learningObjective, recordName: recordID.recordName)
         pendingLearningObjectiveCreateIDs.remove(objectiveID)
         unconfirmedLearningObjectiveRecordNames.remove(recordID.recordName)
         setLearningObjectives(allLearningObjectives)
@@ -2697,7 +2999,9 @@ final class CloudKitStore: ObservableObject {
                 objectWillChange.send()
                 memberships.removeAll { $0.id == resolved }
                 membershipRecordNameByID.removeValue(forKey: resolved)
+                unmarkRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: recordID.recordName)
                 refreshLegacyGroupConvenience()
+                rebuildGroupMembershipCaches()
             }
             return
         }
@@ -2705,7 +3009,9 @@ final class CloudKitStore: ObservableObject {
         objectWillChange.send()
         memberships.removeAll { $0.id == membershipID }
         membershipRecordNameByID.removeValue(forKey: membershipID)
+        unmarkRecordRecentlyWritten(recordType: RecordType.studentGroupMembership, recordName: recordID.recordName)
         refreshLegacyGroupConvenience()
+        rebuildGroupMembershipCaches()
     }
 
     private func deleteProgressByRecordID(_ recordID: CKRecord.ID) {
@@ -2713,11 +3019,13 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Deleting progress with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         progressRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: recordID.recordName)
         for student in students {
             if progressLoadedStudentIDs.contains(student.id) {
                 student.progressRecords.removeAll { $0.id == uuid }
             }
         }
+        rebuildProgressCaches()
     }
 
     private func deleteCustomPropertyByRecordID(_ recordID: CKRecord.ID) {
@@ -2725,6 +3033,7 @@ final class CloudKitStore: ObservableObject {
         syncLogger.info("Deleting custom property with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         customPropertyRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.studentCustomProperty, recordName: recordID.recordName)
         for student in students {
             if customPropertiesLoadedStudentIDs.contains(student.id) {
                 student.customProperties.removeAll { $0.id == uuid }

@@ -28,17 +28,14 @@ struct StudentOverviewBoard: View {
     @State private var editingCategoryTarget: CategoryEditTarget?
 
     private var students: [Student] { store.students }
-    private var allObjectives: [LearningObjective] { store.learningObjectives }
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     private var rootCategories: [LearningObjective] {
-        allObjectives
-            .filter { $0.isRootCategory && $0.isArchived == false }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        store.rootCategoryObjectives()
     }
 
     private var cohortOverall: Int {
-        ProgressCalculator.cohortOverall(students: students, allObjectives: allObjectives)
+        store.cohortOverallProgress(students: students)
     }
 
     private var trimmedSearchText: String {
@@ -280,6 +277,7 @@ struct StudentOverviewBoard: View {
 
     private func studentRow(_ student: Student) -> some View {
         let isEditing = editingStudentId == student.id
+        let studentGroupSummary = groupSummary(for: student)
 
         return HStack(spacing: zoomManager.scaled(10)) {
             ZStack {
@@ -333,12 +331,12 @@ struct StudentOverviewBoard: View {
                 }
 
                 HStack(spacing: zoomManager.scaled(4)) {
-                    Text(groupSummary(for: student))
+                    Text(studentGroupSummary)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .help(groupSummary(for: student))
+                        .help(studentGroupSummary)
 
                     Text("•")
                         .font(.caption2)
@@ -409,11 +407,7 @@ struct StudentOverviewBoard: View {
     }
 
     private func cohortCategoryRow(_ category: LearningObjective) -> some View {
-        let value = ProgressCalculator.cohortObjectiveAverage(
-            objective: category,
-            students: students,
-            allObjectives: allObjectives
-        )
+        let value = store.cohortObjectiveAverage(objective: category, students: students)
 
         return HStack(spacing: zoomManager.scaled(10)) {
             SuccessCriteriaBadge(

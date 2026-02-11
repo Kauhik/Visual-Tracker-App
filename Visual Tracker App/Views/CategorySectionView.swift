@@ -15,17 +15,11 @@ struct CategorySectionView: View {
     @State private var isHeaderHovering: Bool = false
 
     private var childObjectives: [LearningObjective] {
-        allObjectives
-            .filter { $0.isChild(of: categoryObjective) && $0.isArchived == false }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        store.childObjectives(of: categoryObjective)
     }
 
     private var aggregatePercentage: Int {
-        ProgressCalculator.objectivePercentage(
-            student: student,
-            objective: categoryObjective,
-            allObjectives: allObjectives
-        )
+        store.objectivePercentage(student: student, objective: categoryObjective)
     }
 
     private var aggregateStatus: ProgressStatus {
@@ -150,10 +144,10 @@ struct CategorySectionView: View {
     }
 
     private func objectivePercentage(forCode code: String) -> Int {
-        guard let objective = allObjectives.first(where: { $0.code == code }) else {
+        guard let objective = store.objective(forCode: code) else {
             return student.completionPercentage(for: code)
         }
-        return student.completionPercentage(for: objective)
+        return store.objectivePercentage(student: student, objective: objective)
     }
 
     private struct CategoryEditTarget: Identifiable {

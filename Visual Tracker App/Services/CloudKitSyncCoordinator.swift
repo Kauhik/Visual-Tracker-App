@@ -34,6 +34,19 @@ final class CloudKitSyncCoordinator {
     
     private var lastSyncTrigger: (reason: TriggerReason, date: Date)?
     private var syncCount: Int = 0
+    private var isSyncInProgress: Bool = false
+    private var queuedSyncReason: TriggerReason?
+    private var lastFullReconcileDate: Date?
+    private var lastTriggerDateByReason: [TriggerReason: Date] = [:]
+
+    private let triggerDebounceNanoseconds: UInt64 = 350_000_000 // 0.35s
+    private let fullReconcileInterval: TimeInterval = 180 // 3 minutes safety reconciliation
+    private let pollIntervalNanoseconds: UInt64 = 30_000_000_000 // 30s
+    private let minimumIntervalByReason: [TriggerReason: TimeInterval] = [
+        .windowFocused: 2.0,
+        .appBecameActive: 1.0,
+        .poll: 3.0
+    ]
 
     // Subscription IDs (stable, deterministic)
     private enum SubscriptionID {
@@ -69,6 +82,11 @@ final class CloudKitSyncCoordinator {
         SubscriptionID.objectiveProgress: RecordType.objectiveProgress,
         SubscriptionID.studentCustomProperty: RecordType.studentCustomProperty
     ]
+
+    private enum SyncMode: String {
+        case incremental
+        case fullReconcile
+    }
 
     init(store: CloudKitStore, service: CloudKitService) {
         self.store = store
@@ -127,12 +145,12 @@ final class CloudKitSyncCoordinator {
         }
         logger.info("Registered for window focus observer")
 
-        // Poll every 10 seconds - full reconciliation catches creates, updates, AND deletions
+        // Poll periodically as a fallback when push delivery is delayed/missed.
         pollingTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            self.logger.info("Starting polling task (10s interval)")
+            self.logger.info("Starting polling task (30s interval)")
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 10_000_000_000) // 10 seconds
+                try? await Task.sleep(nanoseconds: self.pollIntervalNanoseconds)
                 if Task.isCancelled {
                     self.logger.info("Polling task cancelled")
                     break
@@ -176,13 +194,14 @@ final class CloudKitSyncCoordinator {
 
     /// Triggers a sync with a short debounce to coalesce rapid events
     func triggerSync(reason: TriggerReason) {
+        guard shouldAllowTrigger(reason) else { return }
         lastSyncTrigger = (reason, Date())
         
         // Debounce bursts of triggers
         debouncedTask?.cancel()
         debouncedTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s debounce
+            try? await Task.sleep(nanoseconds: self.triggerDebounceNanoseconds)
             if Task.isCancelled {
                 self.logger.debug("Debounced sync task cancelled")
                 return
@@ -193,6 +212,7 @@ final class CloudKitSyncCoordinator {
     
     /// Triggers a sync immediately with NO debounce
     func triggerImmediateSync(reason: TriggerReason) {
+        guard shouldAllowTrigger(reason) else { return }
         logger.info("Sync triggered (immediate): reason=\(reason.rawValue, privacy: .public)")
         lastSyncTrigger = (reason, Date())
         
@@ -204,15 +224,42 @@ final class CloudKitSyncCoordinator {
         }
     }
     
-    /// Every sync is a full reconciliation - catches creates, updates, AND deletions
     private func executeSync(reason: TriggerReason) async {
+        if isSyncInProgress {
+            queuedSyncReason = reason
+            logger.debug(
+                "Sync already in progress; queued reason=\(reason.rawValue, privacy: .public)"
+            )
+            return
+        }
+
+        isSyncInProgress = true
+        defer {
+            isSyncInProgress = false
+        }
+
         syncCount += 1
         let syncNumber = syncCount
-        logger.info("Executing sync #\(syncNumber, privacy: .public) for reason: \(reason.rawValue, privacy: .public)")
-        
-        await store.reconcileWithServer()
-        
+        let mode = syncMode(for: reason)
+        logger.info(
+            "Executing sync #\(syncNumber, privacy: .public) reason=\(reason.rawValue, privacy: .public) mode=\(mode.rawValue, privacy: .public)"
+        )
+
+        switch mode {
+        case .incremental:
+            await store.performIncrementalSync()
+        case .fullReconcile:
+            await store.reconcileWithServer()
+            lastFullReconcileDate = Date()
+        }
+
         logger.info("Sync #\(syncNumber, privacy: .public) completed")
+
+        if let queuedReason = queuedSyncReason {
+            queuedSyncReason = nil
+            logger.info("Running queued sync reason=\(queuedReason.rawValue, privacy: .public)")
+            triggerSync(reason: queuedReason)
+        }
     }
 
     func noteLocalWrite() {
@@ -225,6 +272,9 @@ final class CloudKitSyncCoordinator {
         info += "  isStarted: \(isStarted)\n"
         info += "  subscriptionsRegistered: \(subscriptionsRegistered)\n"
         info += "  syncCount: \(syncCount)\n"
+        if let lastFullReconcileDate {
+            info += "  lastFullReconcileDate: \(lastFullReconcileDate)\n"
+        }
         if let trigger = lastSyncTrigger {
             info += "  lastSyncTrigger: \(trigger.reason.rawValue) at \(trigger.date)\n"
         }
@@ -298,7 +348,7 @@ final class CloudKitSyncCoordinator {
         logger.info("Subscription setup complete: \(successCount, privacy: .public) succeeded, \(failureCount, privacy: .public) failed")
         
         if failureCount > 0 {
-            logger.warning("Some subscriptions failed - push notifications may not work. Polling fallback is active (10s interval).")
+            logger.warning("Some subscriptions failed - push notifications may not work. Polling fallback is active (30s interval).")
         }
     }
 
@@ -369,7 +419,44 @@ final class CloudKitSyncCoordinator {
             }
         }
 
-        // Follow up with full reconciliation to catch anything missed
-        triggerImmediateSync(reason: .push)
+        // Follow up with a debounced sync to coalesce push bursts and catch missed records.
+        triggerSync(reason: .push)
+    }
+
+    private func shouldAllowTrigger(_ reason: TriggerReason) -> Bool {
+        let now = Date()
+        defer {
+            lastTriggerDateByReason[reason] = now
+        }
+
+        guard let minimumInterval = minimumIntervalByReason[reason],
+              let lastDate = lastTriggerDateByReason[reason] else {
+            return true
+        }
+
+        if now.timeIntervalSince(lastDate) < minimumInterval {
+            logger.debug(
+                "Skipping sync trigger reason=\(reason.rawValue, privacy: .public) due to throttling"
+            )
+            return false
+        }
+
+        return true
+    }
+
+    private func syncMode(for reason: TriggerReason) -> SyncMode {
+        switch reason {
+        case .initial:
+            return .fullReconcile
+        case .localWrite, .push, .windowFocused:
+            return .incremental
+        case .poll, .appBecameActive:
+            return shouldRunFullReconcileNow ? .fullReconcile : .incremental
+        }
+    }
+
+    private var shouldRunFullReconcileNow: Bool {
+        guard let lastFullReconcileDate else { return true }
+        return Date().timeIntervalSince(lastFullReconcileDate) >= fullReconcileInterval
     }
 }

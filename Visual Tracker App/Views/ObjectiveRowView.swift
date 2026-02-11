@@ -11,27 +11,21 @@ struct ObjectiveRowView: View {
     @State private var showingEditor: Bool = false
     @State private var isHovering: Bool = false
 
-    private var progress: ObjectiveProgress? {
-        student.progress(for: objective)
-    }
-
     private var hasChildren: Bool {
-        allObjectives.contains { $0.isChild(of: objective) && $0.isArchived == false }
+        childObjectives.isEmpty == false
     }
 
     private var childObjectives: [LearningObjective] {
-        allObjectives
-            .filter { $0.isChild(of: objective) && $0.isArchived == false }
-            .sorted { $0.sortOrder < $1.sortOrder }
+        store.childObjectives(of: objective)
     }
 
     private var leafPercentage: Int {
-        progress?.value ?? 0
+        store.progressValue(student: student, objective: objective)
     }
 
     private var completionPercentage: Int {
         if hasChildren {
-            return calculateAggregatePercentage()
+            return store.objectivePercentage(student: student, objective: objective)
         }
         return leafPercentage
     }
@@ -49,35 +43,6 @@ struct ObjectiveRowView: View {
         case .complete:
             return .green
         }
-    }
-
-    private func calculateAggregatePercentage() -> Int {
-        let children = childObjectives
-        if children.isEmpty { return leafPercentage }
-
-        var totalPercentage = 0
-        var count = 0
-
-        for child in children {
-            let childPercentage = getPercentageForObjective(child)
-            totalPercentage += childPercentage
-            count += 1
-        }
-
-        return count > 0 ? totalPercentage / count : 0
-    }
-
-    private func getPercentageForObjective(_ obj: LearningObjective) -> Int {
-        let objChildren = allObjectives.filter { $0.isChild(of: obj) && $0.isArchived == false }
-        if objChildren.isEmpty {
-            return student.completionPercentage(for: obj)
-        }
-
-        var total = 0
-        for child in objChildren {
-            total += getPercentageForObjective(child)
-        }
-        return objChildren.count > 0 ? total / objChildren.count : 0
     }
 
     private var indentString: String {
