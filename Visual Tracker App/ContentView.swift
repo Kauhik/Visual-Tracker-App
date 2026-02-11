@@ -104,7 +104,7 @@ struct ContentView: View {
                             .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                     )
                 }
-            } else if store.isLoading {
+            } else if store.shouldShowBlockingLoadingUI {
                 ZStack {
                     Color.black.opacity(0.12).ignoresSafeArea()
                     ProgressView("Loading Cloud Data…")
@@ -121,39 +121,59 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .top) {
-            if store.requiresICloudLogin {
-                HStack(spacing: zoomManager.scaled(12)) {
-                    Image(systemName: "icloud.slash")
-                        .font(.title3)
+            if store.requiresICloudLogin || store.cacheStatusMessage != nil {
+                VStack(spacing: zoomManager.scaled(8)) {
+                    if store.requiresICloudLogin {
+                        HStack(spacing: zoomManager.scaled(12)) {
+                            Image(systemName: "icloud.slash")
+                                .font(.title3)
 
-                    VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
-                        Text("Read-only mode")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Text("Sign in to iCloud to enable edits and syncing.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
+                                Text("Read-only mode")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Text("Sign in to iCloud to enable edits and syncing.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Button("Open iCloud Settings") {
+                                store.openICloudSettings()
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Retry") {
+                                Task { await store.reloadAllData() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding(zoomManager.scaled(12))
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(12)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
                     }
 
-                    Spacer()
-
-                    Button("Open iCloud Settings") {
-                        store.openICloudSettings()
+                    if let cacheStatusMessage = store.cacheStatusMessage {
+                        HStack(spacing: zoomManager.scaled(8)) {
+                            Image(systemName: store.isOfflineUsingSnapshot ? "wifi.exclamationmark" : "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(cacheStatusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, zoomManager.scaled(10))
+                        .padding(.vertical, zoomManager.scaled(6))
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(10)))
                     }
-                    .buttonStyle(.bordered)
-
-                    Button("Retry") {
-                        Task { await store.reloadAllData() }
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
-                .padding(zoomManager.scaled(12))
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(12)))
-                .overlay(
-                    RoundedRectangle(cornerRadius: zoomManager.scaled(12))
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                )
                 .padding(.horizontal, zoomManager.scaled(16))
                 .padding(.top, zoomManager.scaled(12))
             }

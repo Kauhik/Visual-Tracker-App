@@ -25,8 +25,13 @@ final class CloudKitStore: ObservableObject {
     @Published var memberships: [StudentGroupMembership] = []
     @Published var selectedStudentId: UUID?
     @Published var selectedScope: StudentFilterScope = .overall
+    @Published private(set) var hasCachedSnapshotData: Bool = false
+    @Published private(set) var isShowingStaleSnapshot: Bool = false
+    @Published private(set) var isOfflineUsingSnapshot: Bool = false
+    @Published private(set) var cachedSnapshotDate: Date?
 
     private let service: CloudKitService
+    private let isPreviewData: Bool
     private let cohortId: String = "main"
     private var cohortRecordID: CKRecord.ID?
     private var hasLoaded: Bool = false
@@ -61,8 +66,15 @@ final class CloudKitStore: ObservableObject {
     private var groupsByStudentIDCache: [UUID: [CohortGroup]] = [:]
     private var progressValuesByStudentObjectiveID: [UUID: [UUID: Int]] = [:]
     private var progressValuesByStudentObjectiveCode: [UUID: [String: Int]] = [:]
+    private var objectiveAggregateByStudentID: [UUID: [UUID: Int]] = [:]
+    private var studentOverallProgressByID: [UUID: Int] = [:]
+    private var cohortOverallProgressCache: Int = 0
 
     private var syncCoordinator: CloudKitSyncCoordinator?
+    private var progressRebuildTask: Task<Void, Never>?
+    private var snapshotPersistTask: Task<Void, Never>?
+    private let progressRebuildDebounceNanoseconds: UInt64 = 300_000_000
+    private let snapshotPersistDebounceNanoseconds: UInt64 = 400_000_000
     private var lastSyncDateDefaultsKey: String { "VisualTrackerApp.lastSyncDate.\(cohortId)" }
 
     private var lastSyncDate: Date {
@@ -77,9 +89,32 @@ final class CloudKitStore: ObservableObject {
 
     // Exposed to the sync coordinator (read-only)
     var currentCohortRecordID: CKRecord.ID? { cohortRecordID }
+    var shouldShowBlockingLoadingUI: Bool { isLoading && hasCachedSnapshotData == false }
+    var cacheStatusMessage: String? {
+        guard hasCachedSnapshotData else { return nil }
+        let date = cachedSnapshotDate
+        let prefix: String
+        if isOfflineUsingSnapshot {
+            prefix = "Offline"
+        } else if isShowingStaleSnapshot {
+            prefix = "Showing cached data"
+        } else {
+            return nil
+        }
+
+        guard let date else { return prefix }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        let relative = formatter.localizedString(for: date, relativeTo: Date())
+        if isOfflineUsingSnapshot {
+            return "\(prefix) • last updated \(relative)"
+        }
+        return "\(prefix) • refreshing (\(relative))"
+    }
 
     init(service: CloudKitService = CloudKitService(), usePreviewData: Bool = false) {
         self.service = service
+        self.isPreviewData = usePreviewData
         setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
 
         if usePreviewData {
@@ -100,44 +135,68 @@ final class CloudKitStore: ObservableObject {
             setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
             rebuildAllDerivedCaches()
             hasLoaded = true
+            hasCachedSnapshotData = true
+            cachedSnapshotDate = Date()
         }
     }
 
     func loadIfNeeded() async {
         guard hasLoaded == false else { return }
+        if restoreSnapshotIfAvailable() {
+            hasLoaded = true
+            hasCachedSnapshotData = true
+            isShowingStaleSnapshot = true
+            isOfflineUsingSnapshot = false
+            startLiveSyncIfNeeded()
+            Task { [weak self] in
+                guard let self else { return }
+                await self.ensureLearningObjectivesSeededIfNeeded()
+                await self.migrateLegacyGroupMembershipsIfNeeded()
+            }
+            if syncCoordinator == nil {
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.reloadAllData(force: true, showLoadingUI: false, suppressErrorsWhenUsingSnapshot: true)
+                }
+            }
+            return
+        }
         await reloadAllData()
     }
 
     func reloadAllData(force: Bool = false) async {
+        await reloadAllData(force: force, showLoadingUI: true, suppressErrorsWhenUsingSnapshot: false)
+    }
+
+    private func reloadAllData(
+        force: Bool,
+        showLoadingUI: Bool,
+        suppressErrorsWhenUsingSnapshot: Bool
+    ) async {
         if isLoading {
             guard force else { return }
         }
 
-        isLoading = true
+        if showLoadingUI {
+            isLoading = true
+        }
         lastErrorMessage = nil
-        groupRecordNameByID.removeAll()
-        domainRecordNameByID.removeAll()
-        learningObjectiveRecordNameByID.removeAll()
-        studentRecordNameByID.removeAll()
-        membershipRecordNameByID.removeAll()
-        progressRecordNameByID.removeAll()
-        customPropertyRecordNameByID.removeAll()
-        pendingGroupCreateIDs.removeAll()
-        pendingDomainCreateIDs.removeAll()
-        pendingLearningObjectiveCreateIDs.removeAll()
-        pendingCategoryLabelCreateKeys.removeAll()
-        unconfirmedGroupRecordNames.removeAll()
-        unconfirmedDomainRecordNames.removeAll()
-        unconfirmedLearningObjectiveRecordNames.removeAll()
-        unconfirmedCategoryLabelRecordNames.removeAll()
-        recentLocalWriteRecordKeys.removeAll()
+        defer {
+            if showLoadingUI {
+                isLoading = false
+            }
+        }
 
         do {
             let status = try await service.accountStatus()
             if status != .available {
                 requiresICloudLogin = true
-                lastErrorMessage = "iCloud account not available (\(status.rawValue)). Sign in to iCloud on this Mac, then relaunch the app."
-                isLoading = false
+                if hasCachedSnapshotData {
+                    isOfflineUsingSnapshot = true
+                    isShowingStaleSnapshot = true
+                } else {
+                    lastErrorMessage = "iCloud account not available (\(status.rawValue)). Sign in to iCloud on this Mac, then relaunch the app."
+                }
                 return
             }
             requiresICloudLogin = false
@@ -147,51 +206,82 @@ final class CloudKitStore: ObservableObject {
 
             let cohortRef = CKRecord.Reference(recordID: cohortRecord.recordID, action: .none)
 
-            let groupRecords = try await service.queryRecords(
+            async let groupRecords = service.queryRecords(
                 ofType: RecordType.cohortGroup,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.name, ascending: true)]
             )
-            let domainRecords = try await service.queryRecords(
+            async let domainRecords = service.queryRecords(
                 ofType: RecordType.domain,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.name, ascending: true)]
             )
-            let labelRecords = try await service.queryRecords(
+            async let labelRecords = service.queryRecords(
                 ofType: RecordType.categoryLabel,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.key, ascending: true)]
             )
-            let learningObjectiveRecords = try await service.queryRecords(
+            async let learningObjectiveRecords = service.queryRecords(
                 ofType: RecordType.learningObjective,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.sortOrder, ascending: true)]
             )
-            let membershipRecords = try await service.queryRecords(
+            async let membershipRecords = service.queryRecords(
                 ofType: RecordType.studentGroupMembership,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
             )
-
-            let mappedGroups = groupRecords.map { mapGroup(from: $0) }
-            let mappedDomains = domainRecords.map { mapDomain(from: $0) }
-            let mappedLearningObjectives = mapLearningObjectives(from: learningObjectiveRecords)
-
-            let groupMap = dictionaryByRecordName(items: mappedGroups, recordNameLookup: groupRecordNameByID)
-            let domainMap = dictionaryByRecordName(items: mappedDomains, recordNameLookup: domainRecordNameByID)
-
-            let studentRecords = try await service.queryRecords(
+            async let studentRecords = service.queryRecords(
                 ofType: RecordType.student,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef),
                 sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
             )
+            async let progressRecords = service.queryRecords(
+                ofType: RecordType.objectiveProgress,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
+            )
 
-            let mappedStudents = studentRecords.map { mapStudent(from: $0, groupMap: groupMap, domainMap: domainMap) }
+            let (
+                fetchedGroupRecords,
+                fetchedDomainRecords,
+                fetchedLabelRecords,
+                fetchedLearningObjectiveRecords,
+                fetchedMembershipRecords,
+                fetchedStudentRecords,
+                fetchedProgressRecords
+            ) = try await (
+                groupRecords,
+                domainRecords,
+                labelRecords,
+                learningObjectiveRecords,
+                membershipRecords,
+                studentRecords,
+                progressRecords
+            )
 
-            let mappedLabels = labelRecords.map { mapCategoryLabel(from: $0) }
+            clearRecordTrackingStateForFullReload()
+
+            let mappedGroups = fetchedGroupRecords.map { mapGroup(from: $0) }
+            let mappedDomains = fetchedDomainRecords.map { mapDomain(from: $0) }
+            let mappedLearningObjectives = mapLearningObjectives(from: fetchedLearningObjectiveRecords)
+            let mappedLabels = fetchedLabelRecords.map { mapCategoryLabel(from: $0) }
+
+            let groupMap = dictionaryByRecordName(items: mappedGroups, recordNameLookup: groupRecordNameByID)
+            let domainMap = dictionaryByRecordName(items: mappedDomains, recordNameLookup: domainRecordNameByID)
+            let mappedStudents = fetchedStudentRecords.map { mapStudent(from: $0, groupMap: groupMap, domainMap: domainMap) }
             let studentMap = dictionaryByRecordName(items: mappedStudents, recordNameLookup: studentRecordNameByID)
-            let mappedMemberships = membershipRecords.compactMap { record in
+            let mappedMemberships = fetchedMembershipRecords.compactMap { record in
                 mapMembership(from: record, studentMap: studentMap, groupMap: groupMap)
+            }
+
+            let progressByStudentRecordName = Dictionary(grouping: fetchedProgressRecords) { record in
+                studentReference(from: record)?.recordID.recordName ?? ""
+            }
+            for student in mappedStudents {
+                let studentRecordName = studentRecordNameByID[student.id] ?? student.id.uuidString
+                let studentProgressRecords = progressByStudentRecordName[studentRecordName] ?? []
+                let mappedProgress = studentProgressRecords.map { mapProgress(from: $0, student: student) }
+                student.progressRecords = deduplicatedProgress(mappedProgress).sorted { $0.objectiveCode < $1.objectiveCode }
             }
 
             mergeFetchedGroups(mappedGroups)
@@ -207,14 +297,20 @@ final class CloudKitStore: ObservableObject {
             refreshLegacyGroupConvenience()
             rebuildAllDerivedCaches()
 
-            progressLoadedStudentIDs.removeAll()
+            progressLoadedStudentIDs = Set(students.map(\.id))
             customPropertiesLoadedStudentIDs.removeAll()
 
             // Full reload is authoritative; move the incremental sync cursor forward.
-            lastSyncDate = Date()
+            let syncDate = Date()
+            lastSyncDate = syncDate
             hasLoaded = true
+            hasCachedSnapshotData = true
+            isShowingStaleSnapshot = false
+            isOfflineUsingSnapshot = false
+            cachedSnapshotDate = syncDate
 
             startLiveSyncIfNeeded()
+            scheduleSnapshotPersistence()
             Task { [weak self] in
                 guard let self else { return }
                 await self.ensureLearningObjectivesSeededIfNeeded()
@@ -222,10 +318,13 @@ final class CloudKitStore: ObservableObject {
             }
         } catch {
             let detail = service.describe(error)
-            lastErrorMessage = friendlyMessage(for: error, detail: detail)
+            if hasCachedSnapshotData && suppressErrorsWhenUsingSnapshot {
+                isOfflineUsingSnapshot = true
+                isShowingStaleSnapshot = true
+            } else {
+                lastErrorMessage = friendlyMessage(for: error, detail: detail)
+            }
         }
-
-        isLoading = false
     }
 
     func hardRefreshFromCloudKit() async {
@@ -615,9 +714,18 @@ final class CloudKitStore: ObservableObject {
     ) async -> LearningObjective? {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return nil }
+        let normalizedCode = normalizedObjectiveCode(code)
+        guard normalizedCode.isEmpty == false else {
+            lastErrorMessage = "Learning objective code cannot be empty."
+            return nil
+        }
+        guard hasObjectiveCodeConflict(normalizedCode, excluding: nil) == false else {
+            lastErrorMessage = "A learning objective with code '\(normalizedCode)' already exists."
+            return nil
+        }
 
         let objective = LearningObjective(
-            code: code,
+            code: normalizedCode,
             title: title,
             description: description,
             isQuantitative: isQuantitative,
@@ -659,6 +767,15 @@ final class CloudKitStore: ObservableObject {
     ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let normalizedCode = normalizedObjectiveCode(code)
+        guard normalizedCode.isEmpty == false else {
+            lastErrorMessage = "Learning objective code cannot be empty."
+            return
+        }
+        guard hasObjectiveCodeConflict(normalizedCode, excluding: objective.id) == false else {
+            lastErrorMessage = "Another learning objective already uses code '\(normalizedCode)'."
+            return
+        }
 
         let previousCode = objective.code
         let previousTitle = objective.title
@@ -669,7 +786,7 @@ final class CloudKitStore: ObservableObject {
         let previousSortOrder = objective.sortOrder
         let previousIsArchived = objective.isArchived
 
-        objective.code = code
+        objective.code = normalizedCode
         objective.title = title
         objective.objectiveDescription = description
         objective.isQuantitative = isQuantitative
@@ -1385,7 +1502,7 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func setLearningObjectives(_ objectives: [LearningObjective]) {
-        allLearningObjectives = objectives.sorted {
+        allLearningObjectives = deduplicateLearningObjectivesByCode(objectives).sorted {
             if $0.sortOrder != $1.sortOrder {
                 return $0.sortOrder < $1.sortOrder
             }
@@ -1399,11 +1516,16 @@ final class CloudKitStore: ObservableObject {
         }
         learningObjectives = allLearningObjectives.filter { $0.isArchived == false }
         rebuildObjectiveCaches()
+        if hasLoaded {
+            rebuildProgressCaches(debounce: true)
+        } else {
+            rebuildProgressCaches()
+        }
     }
 
     private func defaultLearningObjectivesWithResolvedParents() -> [LearningObjective] {
         let defaults = LearningObjectiveCatalog.defaultObjectives()
-        let objectiveByCode = Dictionary(uniqueKeysWithValues: defaults.map { ($0.code, $0) })
+        let objectiveByCode = objectiveDictionaryByCode(defaults)
         for objective in defaults {
             if let parentCode = objective.parentCode, let parent = objectiveByCode[parentCode] {
                 objective.parentId = parent.id
@@ -1420,13 +1542,14 @@ final class CloudKitStore: ObservableObject {
             return allObjectives.first { $0.id == parentId }
         }
         if let parentCode = objective.parentCode {
-            return allObjectives.first { $0.code == parentCode }
+            let parentKey = normalizedObjectiveCodeKey(parentCode)
+            return allObjectives.first { normalizedObjectiveCodeKey($0.code) == parentKey }
         }
         return nil
     }
 
     private func objectiveByCode(_ code: String) -> LearningObjective? {
-        objectiveByCodeCache[code]
+        objectiveByCodeCache[normalizedObjectiveCodeKey(code)]
     }
 
     private func objectiveByID(_ id: UUID) -> LearningObjective? {
@@ -1499,6 +1622,9 @@ final class CloudKitStore: ObservableObject {
     }
 
     func progressValue(student: Student, objective: LearningObjective) -> Int {
+        if let aggregate = objectiveAggregateByStudentID[student.id]?[objective.id] {
+            return aggregate
+        }
         if let value = progressValuesByStudentObjectiveID[student.id]?[objective.id] {
             return value
         }
@@ -1506,16 +1632,21 @@ final class CloudKitStore: ObservableObject {
     }
 
     func objectivePercentage(student: Student, objective: LearningObjective) -> Int {
+        if let cached = objectiveAggregateByStudentID[student.id]?[objective.id] {
+            return cached
+        }
         var memo: [UUID: Int] = [:]
         return objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
     }
 
     func studentOverallProgress(student: Student) -> Int {
+        if let cached = studentOverallProgressByID[student.id] {
+            return cached
+        }
         guard rootCategoryObjectivesCache.isEmpty == false else { return 0 }
         var memo: [UUID: Int] = [:]
-        var total = 0
-        for category in rootCategoryObjectivesCache {
-            total += objectivePercentage(studentID: student.id, objective: category, memo: &memo)
+        let total = rootCategoryObjectivesCache.reduce(0) { partial, category in
+            partial + objectivePercentage(studentID: student.id, objective: category, memo: &memo)
         }
         return total / rootCategoryObjectivesCache.count
     }
@@ -1524,17 +1655,32 @@ final class CloudKitStore: ObservableObject {
         guard students.isEmpty == false else { return 0 }
         var total = 0
         for student in students {
-            var memo: [UUID: Int] = [:]
-            total += objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
+            if let cached = objectiveAggregateByStudentID[student.id]?[objective.id] {
+                total += cached
+            } else {
+                var memo: [UUID: Int] = [:]
+                total += objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
+            }
         }
         return total / students.count
     }
 
     func cohortOverallProgress(students: [Student]) -> Int {
         guard students.isEmpty == false else { return 0 }
+        if students.count == self.students.count {
+            let localIDs = Set(self.students.map(\.id))
+            let comparedIDs = Set(students.map(\.id))
+            if localIDs == comparedIDs {
+                return cohortOverallProgressCache
+            }
+        }
         var total = 0
         for student in students {
-            total += studentOverallProgress(student: student)
+            if let cached = studentOverallProgressByID[student.id] {
+                total += cached
+            } else {
+                total += studentOverallProgress(student: student)
+            }
         }
         return total / students.count
     }
@@ -2010,6 +2156,275 @@ final class CloudKitStore: ObservableObject {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private func clearRecordTrackingStateForFullReload() {
+        groupRecordNameByID.removeAll()
+        domainRecordNameByID.removeAll()
+        learningObjectiveRecordNameByID.removeAll()
+        studentRecordNameByID.removeAll()
+        membershipRecordNameByID.removeAll()
+        progressRecordNameByID.removeAll()
+        customPropertyRecordNameByID.removeAll()
+        pendingGroupCreateIDs.removeAll()
+        pendingDomainCreateIDs.removeAll()
+        pendingLearningObjectiveCreateIDs.removeAll()
+        pendingCategoryLabelCreateKeys.removeAll()
+        unconfirmedGroupRecordNames.removeAll()
+        unconfirmedDomainRecordNames.removeAll()
+        unconfirmedLearningObjectiveRecordNames.removeAll()
+        unconfirmedCategoryLabelRecordNames.removeAll()
+        recentLocalWriteRecordKeys.removeAll()
+        objectiveRefMigrationRecordNames.removeAll()
+    }
+
+    private func deduplicatedProgress(_ records: [ObjectiveProgress]) -> [ObjectiveProgress] {
+        var byKey: [String: ObjectiveProgress] = [:]
+        for progress in records {
+            let key = progress.objectiveId?.uuidString ?? "code:\(progress.objectiveCode)"
+            if let existing = byKey[key] {
+                if progress.lastUpdated >= existing.lastUpdated {
+                    byKey[key] = progress
+                }
+            } else {
+                byKey[key] = progress
+            }
+        }
+        return Array(byKey.values)
+    }
+
+    private func restoreSnapshotIfAvailable() -> Bool {
+        guard isPreviewData == false else { return false }
+        guard let snapshot = CloudKitStoreSnapshotCache.load(cohortId: cohortId) else { return false }
+
+        clearRecordTrackingStateForFullReload()
+
+        var restoredGroups: [CohortGroup] = []
+        for cached in snapshot.groups {
+            let group = CohortGroup(name: cached.name, colorHex: cached.colorHex)
+            group.id = cached.id
+            groupRecordNameByID[cached.id] = cached.recordName
+            restoredGroups.append(group)
+        }
+        restoredGroups.sort { $0.name < $1.name }
+        let groupsByID = Dictionary(uniqueKeysWithValues: restoredGroups.map { ($0.id, $0) })
+
+        var restoredDomains: [Domain] = []
+        for cached in snapshot.domains {
+            let domain = Domain(name: cached.name, colorHex: cached.colorHex)
+            domain.id = cached.id
+            domainRecordNameByID[cached.id] = cached.recordName
+            restoredDomains.append(domain)
+        }
+        restoredDomains.sort { $0.name < $1.name }
+        let domainsByID = Dictionary(uniqueKeysWithValues: restoredDomains.map { ($0.id, $0) })
+
+        var restoredObjectives: [LearningObjective] = []
+        for cached in snapshot.learningObjectives {
+            let objective = LearningObjective(
+                code: cached.code,
+                title: cached.title,
+                description: cached.objectiveDescription,
+                isQuantitative: cached.isQuantitative,
+                parentCode: cached.parentCode,
+                parentId: cached.parentId,
+                sortOrder: cached.sortOrder,
+                isArchived: cached.isArchived
+            )
+            objective.id = cached.id
+            learningObjectiveRecordNameByID[cached.id] = cached.recordName
+            restoredObjectives.append(objective)
+        }
+
+        var restoredStudents: [Student] = []
+        for cached in snapshot.students {
+            let session = Session(rawValue: cached.sessionRawValue) ?? .morning
+            let student = Student(
+                name: cached.name,
+                group: cached.groupID.flatMap { groupsByID[$0] },
+                session: session,
+                domain: cached.domainID.flatMap { domainsByID[$0] }
+            )
+            student.id = cached.id
+            student.createdAt = cached.createdAt
+            studentRecordNameByID[cached.id] = cached.recordName
+            restoredStudents.append(student)
+        }
+        restoredStudents.sort { $0.createdAt < $1.createdAt }
+        let studentsByID = Dictionary(uniqueKeysWithValues: restoredStudents.map { ($0.id, $0) })
+
+        var restoredMemberships: [StudentGroupMembership] = []
+        for cached in snapshot.memberships {
+            guard let student = studentsByID[cached.studentID],
+                  let group = groupsByID[cached.groupID] else {
+                continue
+            }
+            let membership = StudentGroupMembership(
+                student: student,
+                group: group,
+                createdAt: cached.createdAt,
+                updatedAt: cached.updatedAt
+            )
+            membership.id = cached.id
+            membershipRecordNameByID[cached.id] = cached.recordName
+            restoredMemberships.append(membership)
+        }
+
+        for cached in snapshot.objectiveProgress {
+            guard let student = studentsByID[cached.studentID] else { continue }
+            let progress = ObjectiveProgress(
+                objectiveCode: cached.objectiveCode,
+                completionPercentage: cached.value,
+                notes: cached.notes,
+                objectiveId: cached.objectiveId,
+                value: cached.value
+            )
+            progress.id = cached.id
+            progress.lastUpdated = cached.lastUpdated
+            progress.status = ProgressStatus(rawValue: cached.statusRawValue)
+            ?? ObjectiveProgress.calculateStatus(from: cached.value)
+            progress.student = student
+            student.progressRecords.append(progress)
+            progressRecordNameByID[cached.id] = cached.recordName
+        }
+        for student in restoredStudents {
+            student.progressRecords = deduplicatedProgress(student.progressRecords).sorted { $0.objectiveCode < $1.objectiveCode }
+        }
+
+        let restoredLabels = snapshot.categoryLabels.map { cached in
+            CategoryLabel(code: cached.code, title: cached.title)
+        }.sorted { $0.key < $1.key }
+
+        groups = restoredGroups
+        domains = restoredDomains
+        students = restoredStudents
+        memberships = uniqueMemberships(restoredMemberships)
+        categoryLabels = restoredLabels
+        if restoredObjectives.isEmpty {
+            setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
+        } else {
+            setLearningObjectives(restoredObjectives)
+        }
+        refreshLegacyGroupConvenience()
+        rebuildAllDerivedCaches()
+
+        progressLoadedStudentIDs = Set(restoredStudents.map(\.id))
+        customPropertiesLoadedStudentIDs.removeAll()
+        cohortRecordID = snapshot.cohortRecordName.map { CKRecord.ID(recordName: $0) }
+        lastSyncDate = snapshot.lastSyncDate
+        cachedSnapshotDate = snapshot.savedAt
+        return true
+    }
+
+    private func makeSnapshot() -> CloudKitStoreSnapshot {
+        let savedAt = Date()
+        let snapshotGroups = groups.map { group in
+            CloudKitStoreSnapshot.Group(
+                id: group.id,
+                name: group.name,
+                colorHex: group.colorHex,
+                recordName: groupRecordNameByID[group.id] ?? group.id.uuidString
+            )
+        }
+        let snapshotDomains = domains.map { domain in
+            CloudKitStoreSnapshot.Domain(
+                id: domain.id,
+                name: domain.name,
+                colorHex: domain.colorHex,
+                recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
+            )
+        }
+        let snapshotLabels = categoryLabels.map { label in
+            CloudKitStoreSnapshot.CategoryLabel(
+                code: label.code,
+                title: label.title,
+                recordName: label.key
+            )
+        }
+        let snapshotObjectives = allLearningObjectives.map { objective in
+            CloudKitStoreSnapshot.LearningObjective(
+                id: objective.id,
+                code: objective.code,
+                title: objective.title,
+                objectiveDescription: objective.objectiveDescription,
+                isQuantitative: objective.isQuantitative,
+                parentCode: objective.parentCode,
+                parentId: objective.parentId,
+                sortOrder: objective.sortOrder,
+                isArchived: objective.isArchived,
+                recordName: learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+            )
+        }
+        let snapshotStudents = students.map { student in
+            CloudKitStoreSnapshot.Student(
+                id: student.id,
+                name: student.name,
+                createdAt: student.createdAt,
+                sessionRawValue: student.session.rawValue,
+                groupID: student.group?.id,
+                domainID: student.domain?.id,
+                recordName: studentRecordNameByID[student.id] ?? student.id.uuidString
+            )
+        }
+        let snapshotMemberships = memberships.compactMap { membership -> CloudKitStoreSnapshot.Membership? in
+            guard let studentID = membership.student?.id, let groupID = membership.group?.id else { return nil }
+            return CloudKitStoreSnapshot.Membership(
+                id: membership.id,
+                studentID: studentID,
+                groupID: groupID,
+                createdAt: membership.createdAt,
+                updatedAt: membership.updatedAt,
+                recordName: membershipRecordNameByID[membership.id] ?? membership.id.uuidString
+            )
+        }
+        let snapshotProgress = students.flatMap { student in
+            student.progressRecords.map { progress in
+                CloudKitStoreSnapshot.ObjectiveProgress(
+                    id: progress.id,
+                    studentID: student.id,
+                    objectiveId: progress.objectiveId,
+                    objectiveCode: progress.objectiveCode,
+                    value: progress.value,
+                    notes: progress.notes,
+                    lastUpdated: progress.lastUpdated,
+                    statusRawValue: progress.status.rawValue,
+                    recordName: progressRecordNameByID[progress.id] ?? progress.id.uuidString
+                )
+            }
+        }
+
+        return CloudKitStoreSnapshot(
+            schemaVersion: CloudKitStoreSnapshot.currentSchemaVersion,
+            savedAt: savedAt,
+            cohortRecordName: cohortRecordID?.recordName,
+            lastSyncDate: lastSyncDate,
+            groups: snapshotGroups,
+            domains: snapshotDomains,
+            categoryLabels: snapshotLabels,
+            learningObjectives: snapshotObjectives,
+            students: snapshotStudents,
+            memberships: snapshotMemberships,
+            objectiveProgress: snapshotProgress
+        )
+    }
+
+    private func scheduleSnapshotPersistence() {
+        guard isPreviewData == false else { return }
+        guard hasLoaded else { return }
+        snapshotPersistTask?.cancel()
+        snapshotPersistTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: self.snapshotPersistDebounceNanoseconds)
+            if Task.isCancelled { return }
+            let snapshot = self.makeSnapshot()
+            do {
+                try CloudKitStoreSnapshotCache.save(snapshot, cohortId: self.cohortId)
+                self.cachedSnapshotDate = snapshot.savedAt
+                self.hasCachedSnapshotData = true
+            } catch {
+                self.syncLogger.error("Failed to persist snapshot: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func rebuildAllDerivedCaches() {
         rebuildGroupMembershipCaches()
         rebuildObjectiveCaches()
@@ -2038,12 +2453,12 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func rebuildObjectiveCaches() {
-        objectiveByCodeCache = Dictionary(uniqueKeysWithValues: allLearningObjectives.map { ($0.code, $0) })
+        objectiveByCodeCache = objectiveDictionaryByCode(allLearningObjectives)
 
         let activeObjectives = learningObjectives
 
         let objectiveByID = Dictionary(uniqueKeysWithValues: activeObjectives.map { ($0.id, $0) })
-        let objectiveByCode = Dictionary(uniqueKeysWithValues: activeObjectives.map { ($0.code, $0) })
+        let objectiveByCode = objectiveDictionaryByCode(activeObjectives)
 
         var childrenByParent: [UUID: [LearningObjective]] = [:]
         var roots: [LearningObjective] = []
@@ -2081,7 +2496,87 @@ final class CloudKitStore: ObservableObject {
         objectiveChildrenByParentID = childrenByParent
     }
 
-    private func rebuildProgressCaches() {
+    private func normalizedObjectiveCode(_ code: String) -> String {
+        code.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedObjectiveCodeKey(_ code: String) -> String {
+        normalizedObjectiveCode(code).lowercased()
+    }
+
+    private func hasObjectiveCodeConflict(_ code: String, excluding objectiveID: UUID?) -> Bool {
+        let key = normalizedObjectiveCodeKey(code)
+        guard key.isEmpty == false else { return false }
+        return allLearningObjectives.contains { objective in
+            if let objectiveID, objective.id == objectiveID {
+                return false
+            }
+            return normalizedObjectiveCodeKey(objective.code) == key
+        }
+    }
+
+    private func deduplicateLearningObjectivesByCode(_ objectives: [LearningObjective]) -> [LearningObjective] {
+        var byCode: [String: LearningObjective] = [:]
+        var duplicateKeys: Set<String> = []
+
+        for objective in objectives {
+            objective.code = normalizedObjectiveCode(objective.code)
+            let key = normalizedObjectiveCodeKey(objective.code)
+            guard key.isEmpty == false else { continue }
+            if let existing = byCode[key] {
+                duplicateKeys.insert(key)
+                if shouldPreferObjective(objective, over: existing) {
+                    byCode[key] = objective
+                }
+            } else {
+                byCode[key] = objective
+            }
+        }
+
+        if duplicateKeys.isEmpty == false {
+            syncLogger.error("Detected duplicate LearningObjective code(s): \(duplicateKeys.sorted().joined(separator: ", "), privacy: .public). Keeping one record per code to avoid crashes.")
+        }
+        return Array(byCode.values)
+    }
+
+    private func objectiveDictionaryByCode(_ objectives: [LearningObjective]) -> [String: LearningObjective] {
+        var map: [String: LearningObjective] = [:]
+        for objective in deduplicateLearningObjectivesByCode(objectives) {
+            map[normalizedObjectiveCodeKey(objective.code)] = objective
+        }
+        return map
+    }
+
+    private func shouldPreferObjective(_ candidate: LearningObjective, over existing: LearningObjective) -> Bool {
+        if candidate.isArchived != existing.isArchived {
+            return existing.isArchived && candidate.isArchived == false
+        }
+        if candidate.sortOrder != existing.sortOrder {
+            return candidate.sortOrder < existing.sortOrder
+        }
+        if candidate.title.count != existing.title.count {
+            return candidate.title.count > existing.title.count
+        }
+        return candidate.id.uuidString < existing.id.uuidString
+    }
+
+    private func rebuildProgressCaches(debounce: Bool = false) {
+        if debounce {
+            progressRebuildTask?.cancel()
+            progressRebuildTask = Task { [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(nanoseconds: self.progressRebuildDebounceNanoseconds)
+                if Task.isCancelled { return }
+                self.rebuildProgressCachesNow()
+            }
+            return
+        }
+        progressRebuildTask?.cancel()
+        progressRebuildTask = nil
+        rebuildProgressCachesNow()
+    }
+
+    private func rebuildProgressCachesNow() {
         var byStudentObjectiveID: [UUID: [UUID: Int]] = [:]
         var byStudentObjectiveCode: [UUID: [String: Int]] = [:]
 
@@ -2100,6 +2595,38 @@ final class CloudKitStore: ObservableObject {
 
         progressValuesByStudentObjectiveID = byStudentObjectiveID
         progressValuesByStudentObjectiveCode = byStudentObjectiveCode
+
+        var aggregateByStudentID: [UUID: [UUID: Int]] = [:]
+        var overallByStudentID: [UUID: Int] = [:]
+        var cohortOverallTotal = 0
+
+        for student in students {
+            var memo: [UUID: Int] = [:]
+            for objective in learningObjectives {
+                _ = objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
+            }
+            aggregateByStudentID[student.id] = memo
+
+            let overall: Int
+            if rootCategoryObjectivesCache.isEmpty {
+                overall = 0
+            } else {
+                let total = rootCategoryObjectivesCache.reduce(0) { partial, root in
+                    partial + (memo[root.id] ?? 0)
+                }
+                overall = total / rootCategoryObjectivesCache.count
+            }
+            overallByStudentID[student.id] = overall
+            cohortOverallTotal += overall
+        }
+
+        objectiveAggregateByStudentID = aggregateByStudentID
+        studentOverallProgressByID = overallByStudentID
+        cohortOverallProgressCache = students.isEmpty ? 0 : (cohortOverallTotal / students.count)
+
+        if hasLoaded {
+            scheduleSnapshotPersistence()
+        }
     }
 
     private func objectivePercentage(
@@ -2226,6 +2753,10 @@ final class CloudKitStore: ObservableObject {
             syncLogger.debug("Data not loaded yet, skipping sync coordinator start")
             return
         }
+        guard cohortRecordID != nil else {
+            syncLogger.debug("Cohort record ID unavailable, skipping sync coordinator start")
+            return
+        }
         syncLogger.info("Creating and starting CloudKitSyncCoordinator")
         syncCoordinator = CloudKitSyncCoordinator(store: self, service: service)
         syncCoordinator?.start()
@@ -2311,6 +2842,8 @@ final class CloudKitStore: ObservableObject {
             if totalChanges == 0 {
                 syncLogger.info("Incremental sync: no changes found since last sync")
                 lastSyncDate = syncWindowStart
+                isShowingStaleSnapshot = false
+                isOfflineUsingSnapshot = false
                 return
             }
             
@@ -2352,10 +2885,17 @@ final class CloudKitStore: ObservableObject {
 
             // Advance cursor
             lastSyncDate = syncWindowStart
+            isShowingStaleSnapshot = false
+            isOfflineUsingSnapshot = false
+            scheduleSnapshotPersistence()
             syncLogger.info("Incremental sync complete. Applied \(totalChanges, privacy: .public) total changes. New sync date: \(syncWindowStart, privacy: .public)")
         } catch {
             // Keep it quiet; polling / next activation will retry.
             // Don't overwrite existing user-facing error unless something else does.
+            if hasCachedSnapshotData {
+                isOfflineUsingSnapshot = true
+                isShowingStaleSnapshot = true
+            }
             syncLogger.error("Incremental sync failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -2492,9 +3032,16 @@ final class CloudKitStore: ObservableObject {
             // (We don't want to fetch all progress for all students - that's done on-demand)
             await reconcileProgressForLoadedStudents(cohortRef: cohortRef)
             await reconcileCustomPropertiesForLoadedStudents(cohortRef: cohortRef)
-            
+
+            isShowingStaleSnapshot = false
+            isOfflineUsingSnapshot = false
+            scheduleSnapshotPersistence()
             syncLogger.info("Full reconciliation complete")
         } catch {
+            if hasCachedSnapshotData {
+                isOfflineUsingSnapshot = true
+                isShowingStaleSnapshot = true
+            }
             syncLogger.error("Full reconciliation failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -2505,12 +3052,15 @@ final class CloudKitStore: ObservableObject {
         do {
             let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
             let remoteProgressRecords = try await service.queryRecords(ofType: RecordType.objectiveProgress, predicate: predicate)
-            
+
+            let loadedStudentRecordNames = Set(progressLoadedStudentIDs.map { studentID in
+                studentRecordNameByID[studentID] ?? studentID.uuidString
+            })
+
             // Apply ALL remote progress records for loaded students (handles adds AND updates)
             let relevantRecords = remoteProgressRecords.filter { record in
                 guard let studentRef = studentReference(from: record) else { return false }
-                guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
-                return progressLoadedStudentIDs.contains(uuid)
+                return loadedStudentRecordNames.contains(studentRef.recordID.recordName)
             }
             if relevantRecords.isEmpty == false {
                 syncLogger.info("Applying \(relevantRecords.count, privacy: .public) progress records (adds + updates)")
@@ -2536,12 +3086,15 @@ final class CloudKitStore: ObservableObject {
         do {
             let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
             let remoteCustomPropRecords = try await service.queryRecords(ofType: RecordType.studentCustomProperty, predicate: predicate)
-            
+
+            let loadedStudentRecordNames = Set(customPropertiesLoadedStudentIDs.map { studentID in
+                studentRecordNameByID[studentID] ?? studentID.uuidString
+            })
+
             // Apply ALL remote custom property records for loaded students (handles adds AND updates)
             let relevantRecords = remoteCustomPropRecords.filter { record in
                 guard let studentRef = studentReference(from: record) else { return false }
-                guard let uuid = UUID(uuidString: studentRef.recordID.recordName) else { return false }
-                return customPropertiesLoadedStudentIDs.contains(uuid)
+                return loadedStudentRecordNames.contains(studentRef.recordID.recordName)
             }
             if relevantRecords.isEmpty == false {
                 syncLogger.info("Applying \(relevantRecords.count, privacy: .public) custom property records (adds + updates)")
@@ -2781,13 +3334,14 @@ final class CloudKitStore: ObservableObject {
             }
 
             studentRecordNameByID[uuid] = record.recordID.recordName
+            progressLoadedStudentIDs.insert(uuid)
             unmarkRecordRecentlyWritten(recordType: RecordType.student, recordName: record.recordID.recordName)
         }
 
         students.sort { $0.createdAt < $1.createdAt }
         refreshLegacyGroupConvenience()
         rebuildGroupMembershipCaches()
-        rebuildProgressCaches()
+        rebuildProgressCaches(debounce: true)
         syncLogger.info("Students array now has \(self.students.count, privacy: .public) students")
     }
 
@@ -2805,77 +3359,85 @@ final class CloudKitStore: ObservableObject {
             return map
         }()
 
+        var recordsByStudentID: [UUID: [CKRecord]] = [:]
         for record in records {
             guard let studentRef = studentReference(from: record) else { continue }
             guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
+            recordsByStudentID[studentID, default: []].append(record)
+        }
+
+        for (studentID, studentRecords) in recordsByStudentID {
             guard let student = students.first(where: { $0.id == studentID }) else { continue }
 
-            // Only mutate loaded progress arrays to avoid unexpected heavy loads.
             guard progressLoadedStudentIDs.contains(student.id) else {
                 syncLogger.debug("Skipping progress update for student \(studentID.uuidString.prefix(8), privacy: .public) - progress not loaded")
                 continue
             }
 
-            let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
-            let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
-            var objectiveCode = record[Field.objectiveCode] as? String ?? ""
-            if objectiveCode.isEmpty, let objectiveId, let objective = objectiveByID(objectiveId) {
-                objectiveCode = objective.code
-            }
-
-            let canonicalValue = (record[Field.value] as? Int)
-                ?? (record[Field.value] as? NSNumber)?.intValue
-                ?? (record[Field.completionPercentage] as? Int)
-                ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
-                ?? 0
-            let notes = record[Field.notes] as? String ?? ""
-            let lastUpdated = (record[Field.lastUpdated] as? Date) ?? Date()
-            let statusRaw = record[Field.status] as? String
-            let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: canonicalValue)
-
-            let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: progressRecordNameByID)
-            if let duplicate = student.progressRecords.first(where: { existing in
-                guard existing.id != uuid else { return false }
-                if let objectiveId {
-                    return existing.objectiveId == objectiveId
+            for record in studentRecords {
+                let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+                let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+                var objectiveCode = record[Field.objectiveCode] as? String ?? ""
+                if objectiveCode.isEmpty, let objectiveId, let objective = objectiveByID(objectiveId) {
+                    objectiveCode = objective.code
                 }
-                return existing.objectiveCode == objectiveCode
-            }) {
-                student.progressRecords.removeAll { $0.id == duplicate.id }
-                progressRecordNameByID.removeValue(forKey: duplicate.id)
-            }
 
-            if let existing = student.progressRecords.first(where: { $0.id == uuid }) {
-                syncLogger.info("Updating progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
-                existing.objectiveId = objectiveId
-                existing.objectiveCode = objectiveCode
-                existing.notes = notes
-                existing.lastUpdated = lastUpdated
-                existing.status = status
-                existing.updateCompletion(canonicalValue)
-            } else {
-                syncLogger.info("Adding new progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
-                let p = ObjectiveProgress(
-                    objectiveCode: objectiveCode,
-                    completionPercentage: canonicalValue,
-                    notes: notes,
-                    objectiveId: objectiveId,
-                    value: canonicalValue
-                )
-                p.id = uuid
-                p.student = student
-                p.notes = notes
-                p.lastUpdated = lastUpdated
-                p.status = status
-                student.progressRecords.append(p)
-            }
+                let canonicalValue = (record[Field.value] as? Int)
+                    ?? (record[Field.value] as? NSNumber)?.intValue
+                    ?? (record[Field.completionPercentage] as? Int)
+                    ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
+                    ?? 0
+                let notes = record[Field.notes] as? String ?? ""
+                let lastUpdated = (record[Field.lastUpdated] as? Date) ?? Date()
+                let statusRaw = record[Field.status] as? String
+                let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) } ?? ObjectiveProgress.calculateStatus(from: canonicalValue)
 
-            progressRecordNameByID[uuid] = record.recordID.recordName
-            student.progressRecords.sort { $0.objectiveCode < $1.objectiveCode }
-            scheduleObjectiveRefMigrationIfNeeded(records: [record], studentRecordID: studentRef.recordID)
-            unmarkRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: record.recordID.recordName)
+                let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: progressRecordNameByID)
+                if let duplicate = student.progressRecords.first(where: { existing in
+                    guard existing.id != uuid else { return false }
+                    if let objectiveId {
+                        return existing.objectiveId == objectiveId
+                    }
+                    return existing.objectiveCode == objectiveCode
+                }) {
+                    student.progressRecords.removeAll { $0.id == duplicate.id }
+                    progressRecordNameByID.removeValue(forKey: duplicate.id)
+                }
+
+                if let existing = student.progressRecords.first(where: { $0.id == uuid }) {
+                    syncLogger.info("Updating progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
+                    existing.objectiveId = objectiveId
+                    existing.objectiveCode = objectiveCode
+                    existing.updateCompletion(canonicalValue)
+                    existing.notes = notes
+                    existing.lastUpdated = lastUpdated
+                    existing.status = status
+                } else {
+                    syncLogger.info("Adding new progress for \(objectiveCode, privacy: .public): \(canonicalValue, privacy: .public)%")
+                    let p = ObjectiveProgress(
+                        objectiveCode: objectiveCode,
+                        completionPercentage: canonicalValue,
+                        notes: notes,
+                        objectiveId: objectiveId,
+                        value: canonicalValue
+                    )
+                    p.id = uuid
+                    p.student = student
+                    p.notes = notes
+                    p.lastUpdated = lastUpdated
+                    p.status = status
+                    student.progressRecords.append(p)
+                }
+
+                progressRecordNameByID[uuid] = record.recordID.recordName
+                if let studentRef = studentReference(from: record) {
+                    scheduleObjectiveRefMigrationIfNeeded(records: [record], studentRecordID: studentRef.recordID)
+                }
+                unmarkRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: record.recordID.recordName)
+            }
+            student.progressRecords = deduplicatedProgress(student.progressRecords).sorted { $0.objectiveCode < $1.objectiveCode }
         }
-        rebuildProgressCaches()
+        rebuildProgressCaches(debounce: true)
     }
 
     private func applyCustomPropertyChanges(_ records: [CKRecord]) {
@@ -2961,7 +3523,7 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func deleteStudentByRecordID(_ recordID: CKRecord.ID) {
-        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: studentRecordNameByID)
         syncLogger.info("Deleting student with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         students.removeAll { $0.id == uuid }
@@ -3022,7 +3584,7 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func deleteProgressByRecordID(_ recordID: CKRecord.ID) {
-        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: progressRecordNameByID)
         syncLogger.info("Deleting progress with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         progressRecordNameByID.removeValue(forKey: uuid)
@@ -3032,11 +3594,11 @@ final class CloudKitStore: ObservableObject {
                 student.progressRecords.removeAll { $0.id == uuid }
             }
         }
-        rebuildProgressCaches()
+        rebuildProgressCaches(debounce: true)
     }
 
     private func deleteCustomPropertyByRecordID(_ recordID: CKRecord.ID) {
-        guard let uuid = UUID(uuidString: recordID.recordName) else { return }
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: customPropertyRecordNameByID)
         syncLogger.info("Deleting custom property with id: \(uuid.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
         customPropertyRecordNameByID.removeValue(forKey: uuid)

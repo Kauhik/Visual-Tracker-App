@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'Visual Tracker App' in project 'Visual Tracker App' (no dependencies)

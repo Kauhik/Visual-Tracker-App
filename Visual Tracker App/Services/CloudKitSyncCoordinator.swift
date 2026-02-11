@@ -38,6 +38,7 @@ final class CloudKitSyncCoordinator {
     private var queuedSyncReason: TriggerReason?
     private var lastFullReconcileDate: Date?
     private var lastTriggerDateByReason: [TriggerReason: Date] = [:]
+    private var hasCompletedInitialSync: Bool = false
 
     private let triggerDebounceNanoseconds: UInt64 = 350_000_000 // 0.35s
     private let fullReconcileInterval: TimeInterval = 180 // 3 minutes safety reconciliation
@@ -124,6 +125,10 @@ final class CloudKitSyncCoordinator {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            guard self.hasCompletedInitialSync else {
+                self.logger.debug("Ignoring app-active sync trigger until initial sync finishes")
+                return
+            }
             self.logger.info("App became active, triggering immediate sync")
             Task { @MainActor in
                 self.triggerImmediateSync(reason: .appBecameActive)
@@ -138,6 +143,10 @@ final class CloudKitSyncCoordinator {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            guard self.hasCompletedInitialSync else {
+                self.logger.debug("Ignoring window-focus sync trigger until initial sync finishes")
+                return
+            }
             self.logger.debug("Window became key (focused), triggering sync")
             Task { @MainActor in
                 self.triggerSync(reason: .windowFocused)
@@ -189,6 +198,7 @@ final class CloudKitSyncCoordinator {
         windowFocusToken = nil
         isStarted = false
         subscriptionsRegistered = false
+        hasCompletedInitialSync = false
         logger.info("CloudKit live sync coordinator stopped")
     }
 
@@ -251,6 +261,9 @@ final class CloudKitSyncCoordinator {
         case .fullReconcile:
             await store.reconcileWithServer()
             lastFullReconcileDate = Date()
+        }
+        if reason == .initial {
+            hasCompletedInitialSync = true
         }
 
         logger.info("Sync #\(syncNumber, privacy: .public) completed")
@@ -407,15 +420,20 @@ final class CloudKitSyncCoordinator {
             }
             
             logger.info("📬 Remote change: type=\(recordType, privacy: .public) id=\(recordID.recordName.prefix(8), privacy: .public)... reason=\(reasonStr, privacy: .public)")
-            
-            // Apply the specific change immediately for instant feedback
-            switch query.queryNotificationReason {
-            case .recordDeleted:
-                store.applyRemoteDeletion(recordType: recordType, recordID: recordID)
-            case .recordCreated, .recordUpdated:
-                await store.fetchAndApplyRemoteRecord(recordType: recordType, recordID: recordID)
-            @unknown default:
-                break
+
+            // High-churn record types are better batched through debounced sync to reduce UI churn.
+            if recordType == RecordType.objectiveProgress || recordType == RecordType.studentCustomProperty {
+                logger.debug("Deferring immediate apply for high-churn record type \(recordType, privacy: .public)")
+            } else {
+                // Apply the specific change immediately for instant feedback.
+                switch query.queryNotificationReason {
+                case .recordDeleted:
+                    store.applyRemoteDeletion(recordType: recordType, recordID: recordID)
+                case .recordCreated, .recordUpdated:
+                    await store.fetchAndApplyRemoteRecord(recordType: recordType, recordID: recordID)
+                @unknown default:
+                    break
+                }
             }
         }
 

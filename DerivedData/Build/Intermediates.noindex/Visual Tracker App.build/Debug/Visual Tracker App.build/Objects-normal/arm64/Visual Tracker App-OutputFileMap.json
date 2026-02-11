@@ -176,6 +176,16 @@
     "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStore.swiftdeps",
     "swiftmodule" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStore~partial.swiftmodule"
   },
+  "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Services/CloudKitStoreSnapshotCache.swift" : {
+    "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.swiftconstvalues",
+    "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.d",
+    "diagnostics" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.dia",
+    "index-unit-output-path" : "/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.o",
+    "llvm-bc" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.bc",
+    "object" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.o",
+    "swift-dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache.swiftdeps",
+    "swiftmodule" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitStoreSnapshotCache~partial.swiftmodule"
+  },
   "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/Visual Tracker App/Services/CloudKitSyncCoordinator.swift" : {
     "const-values" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitSyncCoordinator.swiftconstvalues",
     "dependencies" : "/Users/kaushikmanian/Desktop/Apps/Visual Tracker App/DerivedData/Build/Intermediates.noindex/Visual Tracker App.build/Debug/Visual Tracker App.build/Objects-normal/arm64/CloudKitSyncCoordinator.d",
