@@ -749,14 +749,14 @@ struct StudentDetailView: View {
 
     private var resetToolbarButton: some View {
         Menu {
-            Button("Reset Data", role: .destructive) { resetData() }
+            Button("Reset Data (Keep Base Defaults)", role: .destructive) { resetData() }
         } label: {
             Label("Reset", systemImage: "ellipsis.circle")
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
         .disabled(store.isLoading)
-        .help("Reset all data")
+        .help("Reset all data and restore base Expertise Check plus default Success Criteria/Milestones")
     }
 
     private var addStudentCard: some View {
@@ -837,7 +837,7 @@ struct StudentDetailView: View {
 
     private func resetData() {
         Task {
-            await store.resetAllData()
+            await store.resetLearningObjectivesToDefaultTemplate()
             store.selectedStudentId = nil
             selectedGroup = nil
         }

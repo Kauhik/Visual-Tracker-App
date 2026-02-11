@@ -69,6 +69,19 @@ final class CloudKitService {
         }
     }
 
+    func delete(recordIDs: [CKRecord.ID], batchSize: Int = 200) async throws {
+        guard recordIDs.isEmpty == false else { return }
+        let chunkSize = max(1, batchSize)
+        var startIndex = 0
+
+        while startIndex < recordIDs.count {
+            let endIndex = min(startIndex + chunkSize, recordIDs.count)
+            let chunk = Array(recordIDs[startIndex..<endIndex])
+            try await deleteChunk(recordIDs: chunk)
+            startIndex = endIndex
+        }
+    }
+
     func queryRecords(
         ofType recordType: String,
         predicate: NSPredicate,
@@ -160,6 +173,34 @@ final class CloudKitService {
                     continuation.resume(throwing: CKError(.unknownItem))
                 }
             }
+        }
+    }
+
+    private func deleteChunk(recordIDs: [CKRecord.ID]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let operation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: recordIDs)
+            operation.isAtomic = false
+
+            // Optionally log per-record failures when available.
+            if #available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *) {
+                operation.perRecordDeleteBlock = { recordID, result in
+                    if case .failure(let deleteError) = result {
+                        self.logger.error("batch delete failed for \(recordID, privacy: .public): \(self.describe(deleteError), privacy: .public)")
+                    }
+                }
+            }
+
+            // Use the widely-available completion block to finish the continuation.
+            operation.modifyRecordsCompletionBlock = { _, _, error in
+                if let error {
+                    self.logger.error("batch delete operation failed: \(self.describe(error), privacy: .public)")
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+
+            self.database.add(operation)
         }
     }
 

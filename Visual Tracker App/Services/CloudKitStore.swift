@@ -862,6 +862,65 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    func resetLearningObjectivesToDefaultTemplate() async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        isLoading = true
+        resetProgress = ResetProgress(message: "Resetting data to base template...", step: 0, totalSteps: 10)
+        defer {
+            isLoading = false
+            resetProgress = nil
+        }
+
+        do {
+            let cohortRecordID = try await ensureCohortRecordIDForWrite()
+
+            resetProgress = ResetProgress(message: "Deleting objective progress...", step: 1, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
+            clearLocalObjectiveProgressState()
+
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
+            clearLocalCustomPropertyState()
+
+            resetProgress = ResetProgress(message: "Deleting memberships...", step: 3, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.studentGroupMembership, cohortRecordID: cohortRecordID)
+            clearLocalMembershipState()
+
+            resetProgress = ResetProgress(message: "Deleting students...", step: 4, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: cohortRecordID)
+            clearLocalStudentState()
+
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 5, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: cohortRecordID)
+            clearLocalGroupState()
+
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 6, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: cohortRecordID)
+            clearLocalCategoryLabelState()
+
+            resetProgress = ResetProgress(message: "Resetting Expertise Check to base defaults...", step: 7, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
+            clearLocalDomainState()
+
+            resetProgress = ResetProgress(message: "Deleting Success Criteria and Milestones...", step: 8, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.learningObjective, cohortRecordID: cohortRecordID)
+            clearLocalLearningObjectiveState()
+
+            resetProgress = ResetProgress(message: "Restoring default Success Criteria and Milestones...", step: 9, totalSteps: 10)
+            let defaults = defaultLearningObjectivesWithResolvedParents()
+            try await seedLearningObjectives(defaults)
+
+            resetProgress = ResetProgress(message: "Restoring base Expertise Check defaults...", step: 10, totalSteps: 10)
+            await ensurePresetDomains()
+
+            setLearningObjectives(defaults)
+            syncCoordinator?.noteLocalWrite()
+        } catch {
+            lastErrorMessage = "Failed to reset data to base template: \(error.localizedDescription)"
+        }
+    }
+
     func resetAllData() async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
@@ -873,10 +932,7 @@ final class CloudKitStore: ObservableObject {
         }
 
         do {
-            guard let cohortRecordID else {
-                await reloadAllData()
-                return
-            }
+            let cohortRecordID = try await ensureCohortRecordIDForWrite()
 
             resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
@@ -1085,10 +1141,8 @@ final class CloudKitStore: ObservableObject {
     private func deleteAllRecords(ofType recordType: String, cohortRecordID: CKRecord.ID) async throws {
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
-        let records = try await service.queryRecords(ofType: recordType, predicate: predicate)
-        for record in records {
-            try await service.delete(recordID: record.recordID)
-        }
+        let recordIDs = try await service.queryRecordIDs(ofType: recordType, predicate: predicate)
+        try await service.delete(recordIDs: recordIDs)
     }
 
     private func mapGroup(from record: CKRecord) -> CohortGroup {
@@ -1545,19 +1599,7 @@ final class CloudKitStore: ObservableObject {
             }
 
             syncLogger.info("Seeding default learning objectives because remote cohort has zero records")
-            let orderedDefaults = defaults.sorted {
-                if $0.depth != $1.depth {
-                    return $0.depth < $1.depth
-                }
-                if $0.sortOrder != $1.sortOrder {
-                    return $0.sortOrder < $1.sortOrder
-                }
-                return $0.code < $1.code
-            }
-            for objective in orderedDefaults {
-                try await saveLearningObjectiveRecord(objective, allObjectives: defaults)
-            }
-            setLearningObjectives(defaults)
+            try await seedLearningObjectives(defaults)
             syncLogger.info("Default learning objective seed complete: \(defaults.count, privacy: .public) records")
         } catch {
             syncLogger.error("Learning objective seed failed: \(error.localizedDescription, privacy: .public)")
@@ -1724,6 +1766,104 @@ final class CloudKitStore: ObservableObject {
 
     private func existingID(forRecordName recordName: String, lookup: [UUID: String]) -> UUID? {
         lookup.first(where: { $0.value == recordName })?.key
+    }
+
+    private func orderedLearningObjectivesForSeed(_ objectives: [LearningObjective]) -> [LearningObjective] {
+        objectives.sorted {
+            if $0.depth != $1.depth {
+                return $0.depth < $1.depth
+            }
+            if $0.sortOrder != $1.sortOrder {
+                return $0.sortOrder < $1.sortOrder
+            }
+            return $0.code < $1.code
+        }
+    }
+
+    private func seedLearningObjectives(_ objectives: [LearningObjective]) async throws {
+        let orderedObjectives = orderedLearningObjectivesForSeed(objectives)
+        for objective in orderedObjectives {
+            objective.isArchived = false
+            try await saveLearningObjectiveRecord(objective, allObjectives: objectives)
+        }
+        setLearningObjectives(objectives)
+    }
+
+    private func clearLocalObjectiveProgressState() {
+        objectWillChange.send()
+        progressRecordNameByID.removeAll()
+        objectiveRefMigrationRecordNames.removeAll()
+        progressLoadedStudentIDs.removeAll()
+        for student in students {
+            student.progressRecords.removeAll()
+        }
+    }
+
+    private func clearLocalCustomPropertyState() {
+        customPropertyRecordNameByID.removeAll()
+        customPropertiesLoadedStudentIDs.removeAll()
+        for student in students {
+            student.customProperties.removeAll()
+        }
+    }
+
+    private func clearLocalMembershipState() {
+        memberships.removeAll()
+        membershipRecordNameByID.removeAll()
+        refreshLegacyGroupConvenience()
+    }
+
+    private func clearLocalStudentState() {
+        students.removeAll()
+        selectedStudentId = nil
+        studentRecordNameByID.removeAll()
+        progressLoadedStudentIDs.removeAll()
+        customPropertiesLoadedStudentIDs.removeAll()
+        memberships.removeAll()
+        membershipRecordNameByID.removeAll()
+        progressRecordNameByID.removeAll()
+        customPropertyRecordNameByID.removeAll()
+    }
+
+    private func clearLocalGroupState() {
+        groups.removeAll()
+        groupRecordNameByID.removeAll()
+        pendingGroupCreateIDs.removeAll()
+        unconfirmedGroupRecordNames.removeAll()
+        refreshLegacyGroupConvenience()
+    }
+
+    private func clearLocalCategoryLabelState() {
+        categoryLabels.removeAll()
+        pendingCategoryLabelCreateKeys.removeAll()
+        unconfirmedCategoryLabelRecordNames.removeAll()
+    }
+
+    private func clearLocalDomainState() {
+        domains.removeAll()
+        domainRecordNameByID.removeAll()
+        pendingDomainCreateIDs.removeAll()
+        unconfirmedDomainRecordNames.removeAll()
+        for student in students {
+            student.domain = nil
+        }
+    }
+
+    private func clearLocalLearningObjectiveState() {
+        learningObjectiveRecordNameByID.removeAll()
+        pendingLearningObjectiveCreateIDs.removeAll()
+        unconfirmedLearningObjectiveRecordNames.removeAll()
+        allLearningObjectives.removeAll()
+        setLearningObjectives([])
+    }
+
+    private func ensureCohortRecordIDForWrite() async throws -> CKRecord.ID {
+        if let cohortRecordID {
+            return cohortRecordID
+        }
+        let cohortRecord = try await ensureCohortRecord()
+        cohortRecordID = cohortRecord.recordID
+        return cohortRecord.recordID
     }
 
     private func resolvedStableID(forRecordName recordName: String, lookup: [UUID: String]) -> UUID {
