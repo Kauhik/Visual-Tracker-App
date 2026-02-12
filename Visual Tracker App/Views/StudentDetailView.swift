@@ -297,6 +297,8 @@ struct StudentDetailView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 toolbarFilterMenu
                 hardRefreshToolbarButton
+                undoToolbarButton
+                redoToolbarButton
                 exportToolbarButton
                 resetToolbarButton
             }
@@ -720,6 +722,32 @@ struct StudentDetailView: View {
         .help("Force a full refresh from CloudKit")
     }
 
+    private var undoToolbarButton: some View {
+        Button {
+            store.undoLastAction()
+        } label: {
+            Label("Undo", systemImage: "arrow.uturn.backward")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .keyboardShortcut("z", modifiers: [.command])
+        .disabled(store.canUndo == false || store.isLoading || store.isUndoRedoInProgress)
+        .help(store.nextUndoActionLabel.map { "Undo \($0)" } ?? "Undo")
+    }
+
+    private var redoToolbarButton: some View {
+        Button {
+            store.redoLastAction()
+        } label: {
+            Label("Redo", systemImage: "arrow.uturn.forward")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .keyboardShortcut("z", modifiers: [.command, .shift])
+        .disabled(store.canRedo == false || store.isLoading || store.isUndoRedoInProgress)
+        .help(store.nextRedoActionLabel.map { "Redo \($0)" } ?? "Redo")
+    }
+
     private var exportToolbarButton: some View {
         Button {
             exportData()
@@ -848,12 +876,11 @@ struct StudentDetailView: View {
         Task {
             if let newStudent = await store.addStudent(
                 name: trimmed,
-                group: nil,
+                groups: groups,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             ) {
-                await store.setGroups(for: newStudent, groups: groups, updateLegacyGroupField: true)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     selectedStudent = newStudent
                 }

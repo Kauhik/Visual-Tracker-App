@@ -10,6 +10,111 @@ struct ResetProgress: Equatable {
     let totalSteps: Int
 }
 
+extension CloudKitStoreSnapshot.Group: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.Group, rhs: CloudKitStoreSnapshot.Group) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.colorHex == rhs.colorHex
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.Domain: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.Domain, rhs: CloudKitStoreSnapshot.Domain) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.colorHex == rhs.colorHex
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.LearningObjective: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.LearningObjective, rhs: CloudKitStoreSnapshot.LearningObjective) -> Bool {
+        lhs.id == rhs.id
+            && lhs.code == rhs.code
+            && lhs.title == rhs.title
+            && lhs.objectiveDescription == rhs.objectiveDescription
+            && lhs.isQuantitative == rhs.isQuantitative
+            && lhs.parentCode == rhs.parentCode
+            && lhs.parentId == rhs.parentId
+            && lhs.sortOrder == rhs.sortOrder
+            && lhs.isArchived == rhs.isArchived
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.Student: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.Student, rhs: CloudKitStoreSnapshot.Student) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.createdAt == rhs.createdAt
+            && lhs.sessionRawValue == rhs.sessionRawValue
+            && lhs.groupID == rhs.groupID
+            && lhs.domainID == rhs.domainID
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.Membership: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.Membership, rhs: CloudKitStoreSnapshot.Membership) -> Bool {
+        lhs.id == rhs.id
+            && lhs.studentID == rhs.studentID
+            && lhs.groupID == rhs.groupID
+            && lhs.createdAt == rhs.createdAt
+            && lhs.updatedAt == rhs.updatedAt
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.ObjectiveProgress: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.ObjectiveProgress, rhs: CloudKitStoreSnapshot.ObjectiveProgress) -> Bool {
+        lhs.id == rhs.id
+            && lhs.studentID == rhs.studentID
+            && lhs.objectiveId == rhs.objectiveId
+            && lhs.objectiveCode == rhs.objectiveCode
+            && lhs.value == rhs.value
+            && lhs.notes == rhs.notes
+            && lhs.lastUpdated == rhs.lastUpdated
+            && lhs.statusRawValue == rhs.statusRawValue
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+private struct UndoCustomPropertySnapshot: Equatable {
+    let id: UUID
+    let studentID: UUID
+    let key: String
+    let value: String
+    let sortOrder: Int
+    let recordName: String
+}
+
+private struct StudentUndoBundle: Equatable {
+    let student: CloudKitStoreSnapshot.Student
+    let memberships: [CloudKitStoreSnapshot.Membership]
+    let progress: [CloudKitStoreSnapshot.ObjectiveProgress]
+    let customProperties: [UndoCustomPropertySnapshot]
+}
+
+private struct GroupUndoBundle: Equatable {
+    let group: CloudKitStoreSnapshot.Group
+    let memberships: [CloudKitStoreSnapshot.Membership]
+    let affectedStudentIDs: [UUID]
+}
+
+private struct DomainUndoBundle: Equatable {
+    let domain: CloudKitStoreSnapshot.Domain
+    let affectedStudentIDs: [UUID]
+}
+
+private struct UndoOperation {
+    let id: UUID
+    let timestamp: Date
+    let label: String
+    let undo: @MainActor (CloudKitStore) async -> Bool
+    let redo: @MainActor (CloudKitStore) async -> Bool
+}
+
 @MainActor
 final class CloudKitStore: ObservableObject {
     @Published var isLoading: Bool = false
@@ -29,6 +134,11 @@ final class CloudKitStore: ObservableObject {
     @Published private(set) var isShowingStaleSnapshot: Bool = false
     @Published private(set) var isOfflineUsingSnapshot: Bool = false
     @Published private(set) var cachedSnapshotDate: Date?
+    @Published private(set) var canUndo: Bool = false
+    @Published private(set) var canRedo: Bool = false
+    @Published private(set) var nextUndoActionLabel: String?
+    @Published private(set) var nextRedoActionLabel: String?
+    @Published private(set) var isUndoRedoInProgress: Bool = false
 
     private let service: CloudKitService
     private let isPreviewData: Bool
@@ -69,6 +179,12 @@ final class CloudKitStore: ObservableObject {
     private var objectiveAggregateByStudentID: [UUID: [UUID: Int]] = [:]
     private var studentOverallProgressByID: [UUID: Int] = [:]
     private var cohortOverallProgressCache: Int = 0
+    private let maxUndoHistorySize: Int = 50
+    private var undoStack: [UndoOperation] = []
+    private var redoStack: [UndoOperation] = []
+    private var undoRedoExecutionTask: Task<Void, Never>?
+    private var undoCaptureSuppressionDepth: Int = 0
+    private var isApplyingRemoteChanges: Bool = false
 
     private var syncCoordinator: CloudKitSyncCoordinator?
     private var progressRebuildTask: Task<Void, Never>?
@@ -110,6 +226,123 @@ final class CloudKitStore: ObservableObject {
             return "\(prefix) • last updated \(relative)"
         }
         return "\(prefix) • refreshing (\(relative))"
+    }
+
+    func undoLastAction() {
+        enqueueUndoRedoExecution { [weak self] in
+            guard let self else { return }
+            await self.performUndoNow()
+        }
+    }
+
+    func redoLastAction() {
+        enqueueUndoRedoExecution { [weak self] in
+            guard let self else { return }
+            await self.performRedoNow()
+        }
+    }
+
+    private func enqueueUndoRedoExecution(_ block: @escaping () async -> Void) {
+        let previous = undoRedoExecutionTask
+        undoRedoExecutionTask = Task { [weak self] in
+            _ = await previous?.result
+            guard self != nil else { return }
+            await block()
+        }
+    }
+
+    private func performUndoNow() async {
+        guard let operation = undoStack.popLast() else {
+            refreshUndoState()
+            return
+        }
+
+        isUndoRedoInProgress = true
+        refreshUndoState()
+        defer {
+            isUndoRedoInProgress = false
+            refreshUndoState()
+        }
+
+        let succeeded = await operation.undo(self)
+        if succeeded {
+            redoStack.append(operation)
+            if redoStack.count > maxUndoHistorySize {
+                redoStack.removeFirst(redoStack.count - maxUndoHistorySize)
+            }
+        } else {
+            undoStack.append(operation)
+        }
+    }
+
+    private func performRedoNow() async {
+        guard let operation = redoStack.popLast() else {
+            refreshUndoState()
+            return
+        }
+
+        isUndoRedoInProgress = true
+        refreshUndoState()
+        defer {
+            isUndoRedoInProgress = false
+            refreshUndoState()
+        }
+
+        let succeeded = await operation.redo(self)
+        if succeeded {
+            undoStack.append(operation)
+            if undoStack.count > maxUndoHistorySize {
+                undoStack.removeFirst(undoStack.count - maxUndoHistorySize)
+            }
+        } else {
+            redoStack.append(operation)
+        }
+    }
+
+    private var shouldCaptureUndoOperations: Bool {
+        isUndoRedoInProgress == false
+        && isApplyingRemoteChanges == false
+        && undoCaptureSuppressionDepth == 0
+    }
+
+    private func withUndoCaptureSuppressed<T>(_ body: () async throws -> T) async rethrows -> T {
+        undoCaptureSuppressionDepth += 1
+        defer { undoCaptureSuppressionDepth = max(0, undoCaptureSuppressionDepth - 1) }
+        return try await body()
+    }
+
+    private func recordUndoOperation(
+        label: String,
+        undo: @escaping @MainActor (CloudKitStore) async -> Bool,
+        redo: @escaping @MainActor (CloudKitStore) async -> Bool
+    ) {
+        guard shouldCaptureUndoOperations else { return }
+        let operation = UndoOperation(
+            id: UUID(),
+            timestamp: Date(),
+            label: label,
+            undo: undo,
+            redo: redo
+        )
+        undoStack.append(operation)
+        if undoStack.count > maxUndoHistorySize {
+            undoStack.removeFirst(undoStack.count - maxUndoHistorySize)
+        }
+        redoStack.removeAll()
+        refreshUndoState()
+    }
+
+    private func clearUndoHistory() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+        refreshUndoState()
+    }
+
+    private func refreshUndoState() {
+        canUndo = undoStack.isEmpty == false && isUndoRedoInProgress == false
+        canRedo = redoStack.isEmpty == false && isUndoRedoInProgress == false
+        nextUndoActionLabel = undoStack.last?.label
+        nextRedoActionLabel = redoStack.last?.label
     }
 
     init(service: CloudKitService = CloudKitService(), usePreviewData: Bool = false) {
@@ -363,6 +596,12 @@ final class CloudKitStore: ObservableObject {
             unconfirmedGroupRecordNames.insert(saved.recordID.recordName)
             markRecordRecentlyWritten(recordType: RecordType.cohortGroup, recordName: saved.recordID.recordName)
             syncCoordinator?.noteLocalWrite()
+            let snapshot = snapshotGroup(group)
+            recordUndoOperation(
+                label: "Create Group",
+                undo: { store in await store.deleteGroupByID(snapshot.id) },
+                redo: { store in await store.restoreGroupSnapshot(snapshot) }
+            )
         } catch {
             pendingGroupCreateIDs.remove(group.id)
             unconfirmedGroupRecordNames.remove(recordID.recordName)
@@ -373,6 +612,7 @@ final class CloudKitStore: ObservableObject {
     func renameGroup(_ group: CohortGroup, newName: String) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousSnapshot = snapshotGroup(group)
         let previousName = group.name
         group.name = newName
         groups.sort { $0.name < $1.name }
@@ -380,6 +620,12 @@ final class CloudKitStore: ObservableObject {
         do {
             try await saveGroupRecord(group)
             rebuildGroupMembershipCaches()
+            let nextSnapshot = snapshotGroup(group)
+            recordUndoOperation(
+                label: "Rename Group",
+                undo: { store in await store.restoreGroupSnapshot(previousSnapshot) },
+                redo: { store in await store.restoreGroupSnapshot(nextSnapshot) }
+            )
         } catch {
             group.name = previousName
             groups.sort { $0.name < $1.name }
@@ -391,6 +637,7 @@ final class CloudKitStore: ObservableObject {
     func deleteGroup(_ group: CohortGroup) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let undoBundle = snapshotGroupDeleteBundle(group)
         let recordID = recordID(for: group, lookup: groupRecordNameByID)
 
         let affectedStudentIDs = Set(
@@ -411,13 +658,18 @@ final class CloudKitStore: ObservableObject {
                 try await saveStudentRecord(student)
             }
             syncCoordinator?.noteLocalWrite()
+            recordUndoOperation(
+                label: "Delete Group",
+                undo: { store in await store.restoreDeletedGroup(undoBundle) },
+                redo: { store in await store.deleteGroupByID(undoBundle.group.id) }
+            )
         } catch {
             lastErrorMessage = "Failed to delete group: \(error.localizedDescription)"
             await reloadAllData()
         }
     }
 
-    func addDomain(name: String, colorHex: String?) async {
+    func addDomain(name: String, colorHex: String?, recordUndo: Bool = true) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         guard let cohortRecordID else {
@@ -449,6 +701,14 @@ final class CloudKitStore: ObservableObject {
             unconfirmedDomainRecordNames.insert(saved.recordID.recordName)
             markRecordRecentlyWritten(recordType: RecordType.domain, recordName: saved.recordID.recordName)
             syncCoordinator?.noteLocalWrite()
+            if recordUndo {
+                let snapshot = snapshotDomain(domain)
+                recordUndoOperation(
+                    label: "Create Expertise Check",
+                    undo: { store in await store.deleteDomainByID(snapshot.id) },
+                    redo: { store in await store.restoreDomainSnapshot(snapshot) }
+                )
+            }
         } catch {
             pendingDomainCreateIDs.remove(domain.id)
             unconfirmedDomainRecordNames.remove(recordID.recordName)
@@ -468,7 +728,7 @@ final class CloudKitStore: ObservableObject {
         for preset in presets {
             let normalized = normalizedDomainName(preset)
             guard existing.contains(normalized) == false else { continue }
-            await addDomain(name: preset, colorHex: nil)
+            await addDomain(name: preset, colorHex: nil, recordUndo: false)
             existing.insert(normalized)
         }
     }
@@ -476,12 +736,19 @@ final class CloudKitStore: ObservableObject {
     func renameDomain(_ domain: Domain, newName: String) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousSnapshot = snapshotDomain(domain)
         let previousName = domain.name
         domain.name = newName
         domains.sort { $0.name < $1.name }
 
         do {
             try await saveDomainRecord(domain)
+            let nextSnapshot = snapshotDomain(domain)
+            recordUndoOperation(
+                label: "Rename Expertise Check",
+                undo: { store in await store.restoreDomainSnapshot(previousSnapshot) },
+                redo: { store in await store.restoreDomainSnapshot(nextSnapshot) }
+            )
         } catch {
             domain.name = previousName
             domains.sort { $0.name < $1.name }
@@ -492,6 +759,7 @@ final class CloudKitStore: ObservableObject {
     func deleteDomain(_ domain: Domain) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let undoBundle = snapshotDomainDeleteBundle(domain)
         let recordID = recordID(for: domain, lookup: domainRecordNameByID)
 
         let affected = students.filter { $0.domain?.id == domain.id }
@@ -503,6 +771,11 @@ final class CloudKitStore: ObservableObject {
             for student in affected {
                 try await saveStudentRecord(student)
             }
+            recordUndoOperation(
+                label: "Delete Expertise Check",
+                undo: { store in await store.restoreDeletedDomain(undoBundle) },
+                redo: { store in await store.deleteDomainByID(undoBundle.domain.id) }
+            )
         } catch {
             lastErrorMessage = "Failed to delete domain: \(error.localizedDescription)"
             await reloadAllData()
@@ -516,6 +789,22 @@ final class CloudKitStore: ObservableObject {
         domain: Domain?,
         customProperties: [CustomPropertyRow]
     ) async -> Student? {
+        await addStudent(
+            name: name,
+            groups: group.map { [$0] } ?? [],
+            session: session,
+            domain: domain,
+            customProperties: customProperties
+        )
+    }
+
+    func addStudent(
+        name: String,
+        groups: [CohortGroup],
+        session: Session,
+        domain: Domain?,
+        customProperties: [CustomPropertyRow]
+    ) async -> Student? {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return nil }
         guard let cohortRecordID else {
@@ -523,7 +812,7 @@ final class CloudKitStore: ObservableObject {
             return nil
         }
 
-        let student = Student(name: name, group: group, session: session, domain: domain)
+        let student = Student(name: name, group: nil, session: session, domain: domain)
         students.append(student)
         students.sort { $0.createdAt < $1.createdAt }
         rebuildProgressCaches()
@@ -543,11 +832,17 @@ final class CloudKitStore: ObservableObject {
             if customProperties.isEmpty == false {
                 try await replaceCustomProperties(for: student, rows: customProperties)
             }
-            if let group {
-                try await setGroupsInternal(for: student, groups: [group], updateLegacyGroupField: false)
+            if groups.isEmpty == false {
+                try await setGroupsInternal(for: student, groups: groups, updateLegacyGroupField: true)
             }
 
             syncCoordinator?.noteLocalWrite()
+            let createdBundle = snapshotStudentUndoBundle(student)
+            recordUndoOperation(
+                label: "Create Student",
+                undo: { store in await store.deleteStudentByID(createdBundle.student.id) },
+                redo: { store in await store.restoreDeletedStudent(createdBundle) }
+            )
             return student
         } catch {
             students.removeAll { $0.id == student.id }
@@ -564,28 +859,55 @@ final class CloudKitStore: ObservableObject {
         domain: Domain?,
         customProperties: [CustomPropertyRow]
     ) async {
+        let resolvedGroups: [CohortGroup]
+        if let group {
+            resolvedGroups = [group]
+        } else {
+            let existingExplicitGroups = explicitGroups(for: student)
+            if existingExplicitGroups.count > 1 {
+                resolvedGroups = existingExplicitGroups
+            } else {
+                resolvedGroups = []
+            }
+        }
+
+        await updateStudent(
+            student,
+            name: name,
+            groups: resolvedGroups,
+            session: session,
+            domain: domain,
+            customProperties: customProperties
+        )
+    }
+
+    func updateStudent(
+        _ student: Student,
+        name: String,
+        groups: [CohortGroup],
+        session: Session,
+        domain: Domain?,
+        customProperties: [CustomPropertyRow]
+    ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousBundle = snapshotStudentUndoBundle(student)
         student.name = name
         student.session = session
         student.domain = domain
 
         do {
             try await saveStudentRecord(student)
-            if let group {
-                try await setGroupsInternal(for: student, groups: [group], updateLegacyGroupField: true)
-            } else {
-                let existingExplicitGroups = explicitGroups(for: student)
-                if existingExplicitGroups.count > 1 {
-                    // The edit sheet is still single-group. Preserve explicit many-to-many memberships
-                    // when no group is selected to avoid accidental data loss.
-                    refreshLegacyGroupConvenience(for: student)
-                    try await saveStudentRecord(student)
-                } else {
-                    try await setGroupsInternal(for: student, groups: [], updateLegacyGroupField: true)
-                }
-            }
+            try await setGroupsInternal(for: student, groups: groups, updateLegacyGroupField: true)
             try await replaceCustomProperties(for: student, rows: customProperties)
+            let updatedBundle = snapshotStudentUndoBundle(student)
+            if previousBundle != updatedBundle {
+                recordUndoOperation(
+                    label: "Edit Student",
+                    undo: { store in await store.restoreStudentEditableState(previousBundle) },
+                    redo: { store in await store.restoreStudentEditableState(updatedBundle) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to update student: \(error.localizedDescription)"
             await reloadAllData()
@@ -595,11 +917,20 @@ final class CloudKitStore: ObservableObject {
     func renameStudent(_ student: Student, newName: String) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousBundle = snapshotStudentUndoBundle(student)
         let previousName = student.name
         student.name = newName
 
         do {
             try await saveStudentRecord(student)
+            let updatedBundle = snapshotStudentUndoBundle(student)
+            if previousBundle != updatedBundle {
+                recordUndoOperation(
+                    label: "Rename Student",
+                    undo: { store in await store.restoreStudentEditableState(previousBundle) },
+                    redo: { store in await store.restoreStudentEditableState(updatedBundle) }
+                )
+            }
         } catch {
             student.name = previousName
             lastErrorMessage = "Failed to rename student: \(error.localizedDescription)"
@@ -609,9 +940,19 @@ final class CloudKitStore: ObservableObject {
     func moveStudent(_ student: Student, to group: CohortGroup?) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousGroupIDs = explicitGroupIDs(for: student)
 
         do {
             try await setGroupsInternal(for: student, groups: group.map { [$0] } ?? [], updateLegacyGroupField: true)
+            let newGroupIDs = explicitGroupIDs(for: student)
+            if previousGroupIDs != newGroupIDs {
+                let studentID = student.id
+                recordUndoOperation(
+                    label: "Move Student",
+                    undo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: previousGroupIDs) },
+                    redo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: newGroupIDs) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to move student: \(error.localizedDescription)"
         }
@@ -620,6 +961,7 @@ final class CloudKitStore: ObservableObject {
     func deleteStudent(_ student: Student) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let undoBundle = await snapshotDeletedStudentBundle(student)
         let recordID = recordID(for: student, lookup: studentRecordNameByID)
 
         students.removeAll { $0.id == student.id }
@@ -632,6 +974,11 @@ final class CloudKitStore: ObservableObject {
             try await deleteProgress(for: student)
             try await deleteCustomProperties(for: student)
             syncCoordinator?.noteLocalWrite()
+            recordUndoOperation(
+                label: "Delete Student",
+                undo: { store in await store.restoreDeletedStudent(undoBundle) },
+                redo: { store in await store.deleteStudentByID(undoBundle.student.id) }
+            )
         } catch {
             lastErrorMessage = "Failed to delete student: \(error.localizedDescription)"
             await reloadAllData()
@@ -670,12 +1017,22 @@ final class CloudKitStore: ObservableObject {
     ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousGroupIDs = explicitGroupIDs(for: student)
         do {
             try await setGroupsInternal(
                 for: student,
                 groups: groups,
                 updateLegacyGroupField: updateLegacyGroupField
             )
+            let updatedGroupIDs = explicitGroupIDs(for: student)
+            if previousGroupIDs != updatedGroupIDs {
+                let studentID = student.id
+                recordUndoOperation(
+                    label: "Update Group Memberships",
+                    undo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: previousGroupIDs) },
+                    redo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: updatedGroupIDs) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to update student groups: \(error.localizedDescription)"
             await reloadAllData()
@@ -685,8 +1042,18 @@ final class CloudKitStore: ObservableObject {
     func addStudentToGroup(_ student: Student, group: CohortGroup) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousGroupIDs = explicitGroupIDs(for: student)
         do {
             try await addStudentToGroupInternal(student, group: group, updateLegacyGroupField: true)
+            let updatedGroupIDs = explicitGroupIDs(for: student)
+            if previousGroupIDs != updatedGroupIDs {
+                let studentID = student.id
+                recordUndoOperation(
+                    label: "Add Student to Group",
+                    undo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: previousGroupIDs) },
+                    redo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: updatedGroupIDs) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to add student to group: \(error.localizedDescription)"
             await reloadAllData()
@@ -696,8 +1063,18 @@ final class CloudKitStore: ObservableObject {
     func removeStudentFromGroup(_ student: Student, group: CohortGroup) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousGroupIDs = explicitGroupIDs(for: student)
         do {
             try await removeStudentFromGroupInternal(student, group: group, updateLegacyGroupField: true)
+            let updatedGroupIDs = explicitGroupIDs(for: student)
+            if previousGroupIDs != updatedGroupIDs {
+                let studentID = student.id
+                recordUndoOperation(
+                    label: "Remove Student from Group",
+                    undo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: previousGroupIDs) },
+                    redo: { store in await store.applyStudentGroupSelection(studentID: studentID, groupIDs: updatedGroupIDs) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to remove student from group: \(error.localizedDescription)"
             await reloadAllData()
@@ -744,6 +1121,14 @@ final class CloudKitStore: ObservableObject {
         do {
             try await saveLearningObjectiveRecord(objective)
             unconfirmedLearningObjectiveRecordNames.remove(localRecordName)
+            let createdSnapshot = snapshotLearningObjective(objective)
+            let archivedSnapshot = snapshotLearningObjective(objective, isArchivedOverride: true)
+            let label = objective.isRootCategory ? "Create Success Criterion" : "Create Milestone"
+            recordUndoOperation(
+                label: label,
+                undo: { store in await store.restoreLearningObjectiveSnapshot(archivedSnapshot) },
+                redo: { store in await store.restoreLearningObjectiveSnapshot(createdSnapshot) }
+            )
             return objective
         } catch {
             pendingLearningObjectiveCreateIDs.remove(objective.id)
@@ -767,6 +1152,7 @@ final class CloudKitStore: ObservableObject {
     ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        let previousSnapshot = snapshotLearningObjective(objective)
         let normalizedCode = normalizedObjectiveCode(code)
         guard normalizedCode.isEmpty == false else {
             lastErrorMessage = "Learning objective code cannot be empty."
@@ -798,6 +1184,15 @@ final class CloudKitStore: ObservableObject {
 
         do {
             try await saveLearningObjectiveRecord(objective)
+            let updatedSnapshot = snapshotLearningObjective(objective)
+            if previousSnapshot != updatedSnapshot {
+                let label = objective.isRootCategory ? "Edit Success Criterion" : "Edit Milestone"
+                recordUndoOperation(
+                    label: label,
+                    undo: { store in await store.restoreLearningObjectiveSnapshot(previousSnapshot) },
+                    redo: { store in await store.restoreLearningObjectiveSnapshot(updatedSnapshot) }
+                )
+            }
         } catch {
             objective.code = previousCode
             objective.title = previousTitle
@@ -816,11 +1211,19 @@ final class CloudKitStore: ObservableObject {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         guard objective.isArchived == false else { return }
+        let previousSnapshot = snapshotLearningObjective(objective)
         objective.isArchived = true
         setLearningObjectives(allLearningObjectives)
 
         do {
             try await saveLearningObjectiveRecord(objective)
+            let archivedSnapshot = snapshotLearningObjective(objective)
+            let label = objective.isRootCategory ? "Archive Success Criterion" : "Archive Milestone"
+            recordUndoOperation(
+                label: label,
+                undo: { store in await store.restoreLearningObjectiveSnapshot(previousSnapshot) },
+                redo: { store in await store.restoreLearningObjectiveSnapshot(archivedSnapshot) }
+            )
         } catch {
             objective.isArchived = false
             setLearningObjectives(allLearningObjectives)
@@ -903,18 +1306,29 @@ final class CloudKitStore: ObservableObject {
     }
 
     func setProgress(student: Student, objective: LearningObjective, value: Int) async {
-        await setProgressInternal(student: student, objectiveCode: objective.code, objective: objective, value: value)
+        await setProgressInternal(student: student, objectiveCode: objective.code, objective: objective, value: value, notes: nil)
     }
 
     func setProgress(student: Student, objectiveCode: String, value: Int) async {
-        await setProgressInternal(student: student, objectiveCode: objectiveCode, objective: nil, value: value)
+        await setProgressInternal(student: student, objectiveCode: objectiveCode, objective: nil, value: value, notes: nil)
+    }
+
+    func setProgress(student: Student, objective: LearningObjective, value: Int, notes: String) async {
+        await setProgressInternal(
+            student: student,
+            objectiveCode: objective.code,
+            objective: objective,
+            value: value,
+            notes: notes
+        )
     }
 
     private func setProgressInternal(
         student: Student,
         objectiveCode: String,
         objective explicitObjective: LearningObjective?,
-        value: Int
+        value: Int,
+        notes: String?
     ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
@@ -922,6 +1336,13 @@ final class CloudKitStore: ObservableObject {
         let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
         let objective = explicitObjective ?? objectiveByCode(objectiveCode)
         let canonicalObjectiveCode = objective?.code ?? objectiveCode
+        let previousProgress = student.progressRecords.first(where: { existing in
+            if let objective {
+                return existing.objectiveId == objective.id || existing.objectiveCode == objective.code
+            }
+            return existing.objectiveCode == objectiveCode
+        })
+        let previousSnapshot = previousProgress.map { snapshotProgress($0, studentID: student.id) }
 
         let progress: ObjectiveProgress
         if let existing = student.progressRecords.first(where: { existing in
@@ -934,10 +1355,14 @@ final class CloudKitStore: ObservableObject {
             progress.objectiveId = objective?.id
             progress.objectiveCode = canonicalObjectiveCode
             progress.updateCompletion(value)
+            if let notes {
+                progress.notes = notes
+            }
         } else {
             progress = ObjectiveProgress(
                 objectiveCode: canonicalObjectiveCode,
                 completionPercentage: value,
+                notes: notes ?? "",
                 objectiveId: objective?.id,
                 value: value
             )
@@ -992,6 +1417,20 @@ final class CloudKitStore: ObservableObject {
             progressLoadedStudentIDs.insert(student.id)
             markRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: saved.recordID.recordName)
             rebuildProgressCaches()
+            let updatedSnapshot = snapshotProgress(progress, studentID: student.id)
+            if previousSnapshot != updatedSnapshot {
+                let label = "Update Progress"
+                recordUndoOperation(
+                    label: label,
+                    undo: { store in
+                        if let previousSnapshot {
+                            return await store.restoreProgressSnapshot(previousSnapshot)
+                        }
+                        return await store.deleteProgressBySnapshot(updatedSnapshot)
+                    },
+                    redo: { store in await store.restoreProgressSnapshot(updatedSnapshot) }
+                )
+            }
         } catch {
             lastErrorMessage = "Failed to save progress: \(error.localizedDescription)"
         }
@@ -1020,6 +1459,7 @@ final class CloudKitStore: ObservableObject {
     func resetLearningObjectivesToDefaultTemplate() async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        clearUndoHistory()
         isLoading = true
         resetProgress = ResetProgress(message: "Resetting data to base template...", step: 0, totalSteps: 10)
         defer {
@@ -1079,6 +1519,7 @@ final class CloudKitStore: ObservableObject {
     func resetAllData() async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        clearUndoHistory()
         isLoading = true
         resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 7)
         defer {
@@ -1451,7 +1892,9 @@ final class CloudKitStore: ObservableObject {
 
     private func mapProgress(from record: CKRecord, student: Student) -> ObjectiveProgress {
         let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
-        let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+        let objectiveId: UUID? = objectiveRef.flatMap { reference in
+            self.objectiveID(forRecordName: reference.recordID.recordName)
+        }
         var objectiveCode = record[Field.objectiveCode] as? String ?? ""
         if objectiveCode.isEmpty, let objectiveId, let mappedObjective = objectiveByID(objectiveId) {
             objectiveCode = mappedObjective.code
@@ -2006,6 +2449,703 @@ final class CloudKitStore: ObservableObject {
             lastErrorMessage = "Unable to verify iCloud account for writes. \(service.describe(error))"
             return false
         }
+    }
+
+    private func snapshotGroup(_ group: CohortGroup) -> CloudKitStoreSnapshot.Group {
+        CloudKitStoreSnapshot.Group(
+            id: group.id,
+            name: group.name,
+            colorHex: group.colorHex,
+            recordName: groupRecordNameByID[group.id] ?? group.id.uuidString
+        )
+    }
+
+    private func snapshotDomain(_ domain: Domain) -> CloudKitStoreSnapshot.Domain {
+        CloudKitStoreSnapshot.Domain(
+            id: domain.id,
+            name: domain.name,
+            colorHex: domain.colorHex,
+            recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
+        )
+    }
+
+    private func snapshotLearningObjective(
+        _ objective: LearningObjective,
+        isArchivedOverride: Bool? = nil
+    ) -> CloudKitStoreSnapshot.LearningObjective {
+        CloudKitStoreSnapshot.LearningObjective(
+            id: objective.id,
+            code: objective.code,
+            title: objective.title,
+            objectiveDescription: objective.objectiveDescription,
+            isQuantitative: objective.isQuantitative,
+            parentCode: objective.parentCode,
+            parentId: objective.parentId,
+            sortOrder: objective.sortOrder,
+            isArchived: isArchivedOverride ?? objective.isArchived,
+            recordName: learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+        )
+    }
+
+    private func snapshotStudent(_ student: Student) -> CloudKitStoreSnapshot.Student {
+        CloudKitStoreSnapshot.Student(
+            id: student.id,
+            name: student.name,
+            createdAt: student.createdAt,
+            sessionRawValue: student.session.rawValue,
+            groupID: student.group?.id,
+            domainID: student.domain?.id,
+            recordName: studentRecordNameByID[student.id] ?? student.id.uuidString
+        )
+    }
+
+    private func snapshotMembership(_ membership: StudentGroupMembership) -> CloudKitStoreSnapshot.Membership? {
+        guard let studentID = membership.student?.id, let groupID = membership.group?.id else { return nil }
+        return CloudKitStoreSnapshot.Membership(
+            id: membership.id,
+            studentID: studentID,
+            groupID: groupID,
+            createdAt: membership.createdAt,
+            updatedAt: membership.updatedAt,
+            recordName: membershipRecordNameByID[membership.id] ?? membership.id.uuidString
+        )
+    }
+
+    private func snapshotProgress(
+        _ progress: ObjectiveProgress,
+        studentID: UUID
+    ) -> CloudKitStoreSnapshot.ObjectiveProgress {
+        CloudKitStoreSnapshot.ObjectiveProgress(
+            id: progress.id,
+            studentID: studentID,
+            objectiveId: progress.objectiveId,
+            objectiveCode: progress.objectiveCode,
+            value: progress.value,
+            notes: progress.notes,
+            lastUpdated: progress.lastUpdated,
+            statusRawValue: progress.status.rawValue,
+            recordName: progressRecordNameByID[progress.id] ?? progress.id.uuidString
+        )
+    }
+
+    private func snapshotCustomProperty(
+        _ property: StudentCustomProperty,
+        studentID: UUID
+    ) -> UndoCustomPropertySnapshot {
+        UndoCustomPropertySnapshot(
+            id: property.id,
+            studentID: studentID,
+            key: property.key,
+            value: property.value,
+            sortOrder: property.sortOrder,
+            recordName: customPropertyRecordNameByID[property.id] ?? property.id.uuidString
+        )
+    }
+
+    private func explicitGroupIDs(for student: Student) -> [UUID] {
+        explicitGroups(for: student)
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+    }
+
+    private func snapshotStudentUndoBundle(_ student: Student) -> StudentUndoBundle {
+        let membershipSnapshots = memberships
+            .filter { $0.student?.id == student.id }
+            .compactMap { snapshotMembership($0) }
+            .sorted { $0.createdAt < $1.createdAt }
+        let progressSnapshots = student.progressRecords
+            .map { snapshotProgress($0, studentID: student.id) }
+            .sorted { $0.objectiveCode < $1.objectiveCode }
+        let customSnapshots = student.customProperties
+            .map { snapshotCustomProperty($0, studentID: student.id) }
+            .sorted { $0.sortOrder < $1.sortOrder }
+
+        return StudentUndoBundle(
+            student: snapshotStudent(student),
+            memberships: membershipSnapshots,
+            progress: progressSnapshots,
+            customProperties: customSnapshots
+        )
+    }
+
+    private func snapshotDeletedStudentBundle(_ student: Student) async -> StudentUndoBundle {
+        let fallback = snapshotStudentUndoBundle(student)
+        guard let cohortRecordID else { return fallback }
+
+        let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
+        let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
+
+        var progressSnapshots = fallback.progress
+        do {
+            let records = try await queryProgressRecords(cohortRef: cohortRef, studentRecordID: studentRecordID)
+            if records.isEmpty == false {
+                progressSnapshots = records
+                    .map { snapshotProgress(from: $0, studentID: student.id) }
+                    .sorted { $0.objectiveCode < $1.objectiveCode }
+            }
+        } catch {
+            syncLogger.error("Failed to snapshot progress before student delete: \(error.localizedDescription, privacy: .public)")
+        }
+
+        var customSnapshots = fallback.customProperties
+        do {
+            let predicate = NSPredicate(format: "cohortRef == %@ AND student == %@", cohortRef, studentRef)
+            let records = try await service.queryRecords(ofType: RecordType.studentCustomProperty, predicate: predicate)
+            if records.isEmpty == false {
+                customSnapshots = records
+                    .map { snapshotCustomProperty(from: $0, studentID: student.id) }
+                    .sorted { $0.sortOrder < $1.sortOrder }
+            }
+        } catch {
+            syncLogger.error("Failed to snapshot custom properties before student delete: \(error.localizedDescription, privacy: .public)")
+        }
+
+        return StudentUndoBundle(
+            student: fallback.student,
+            memberships: fallback.memberships,
+            progress: progressSnapshots,
+            customProperties: customSnapshots
+        )
+    }
+
+    private func snapshotGroupDeleteBundle(_ group: CohortGroup) -> GroupUndoBundle {
+        let membershipSnapshots = memberships
+            .filter { $0.group?.id == group.id }
+            .compactMap { snapshotMembership($0) }
+            .sorted { $0.createdAt < $1.createdAt }
+        let affectedStudentIDs = students
+            .filter { student in
+                student.group?.id == group.id
+                || membershipSnapshots.contains(where: { $0.studentID == student.id })
+            }
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+        return GroupUndoBundle(
+            group: snapshotGroup(group),
+            memberships: membershipSnapshots,
+            affectedStudentIDs: affectedStudentIDs
+        )
+    }
+
+    private func snapshotDomainDeleteBundle(_ domain: Domain) -> DomainUndoBundle {
+        let affectedStudentIDs = students
+            .filter { $0.domain?.id == domain.id }
+            .map(\.id)
+            .sorted { $0.uuidString < $1.uuidString }
+        return DomainUndoBundle(domain: snapshotDomain(domain), affectedStudentIDs: affectedStudentIDs)
+    }
+
+    private func snapshotProgress(from record: CKRecord, studentID: UUID) -> CloudKitStoreSnapshot.ObjectiveProgress {
+        let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+        let resolvedObjectiveID: UUID? = objectiveRef.flatMap { reference in
+            self.objectiveID(forRecordName: reference.recordID.recordName)
+        }
+        var objectiveCode = record[Field.objectiveCode] as? String ?? ""
+        if objectiveCode.isEmpty, let resolvedObjectiveID, let objective = objectiveByID(resolvedObjectiveID) {
+            objectiveCode = objective.code
+        }
+        let value = (record[Field.value] as? Int)
+            ?? (record[Field.value] as? NSNumber)?.intValue
+            ?? (record[Field.completionPercentage] as? Int)
+            ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
+            ?? 0
+        let notes = record[Field.notes] as? String ?? ""
+        let lastUpdated = (record[Field.lastUpdated] as? Date) ?? Date()
+        let statusRaw = record[Field.status] as? String
+        let status = statusRaw ?? ObjectiveProgress.calculateStatus(from: value).rawValue
+        let progressID = resolvedStableID(forRecordName: record.recordID.recordName, lookup: progressRecordNameByID)
+
+        return CloudKitStoreSnapshot.ObjectiveProgress(
+            id: progressID,
+            studentID: studentID,
+            objectiveId: resolvedObjectiveID,
+            objectiveCode: objectiveCode,
+            value: value,
+            notes: notes,
+            lastUpdated: lastUpdated,
+            statusRawValue: status,
+            recordName: record.recordID.recordName
+        )
+    }
+
+    private func snapshotCustomProperty(from record: CKRecord, studentID: UUID) -> UndoCustomPropertySnapshot {
+        let propertyID = resolvedStableID(forRecordName: record.recordID.recordName, lookup: customPropertyRecordNameByID)
+        let key = record[Field.key] as? String ?? ""
+        let value = record[Field.value] as? String ?? ""
+        let sortOrder = (record[Field.sortOrder] as? Int)
+            ?? (record[Field.sortOrder] as? NSNumber)?.intValue
+            ?? 0
+        return UndoCustomPropertySnapshot(
+            id: propertyID,
+            studentID: studentID,
+            key: key,
+            value: value,
+            sortOrder: sortOrder,
+            recordName: record.recordID.recordName
+        )
+    }
+
+    private func deleteGroupByID(_ groupID: UUID) async -> Bool {
+        guard let group = groups.first(where: { $0.id == groupID }) else { return true }
+        await withUndoCaptureSuppressed {
+            await deleteGroup(group)
+        }
+        return groups.contains(where: { $0.id == groupID }) == false
+    }
+
+    private func restoreGroupSnapshot(_ snapshot: CloudKitStoreSnapshot.Group) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        do {
+            _ = try await ensureCohortRecordIDForWrite()
+            let existing = groups.first(where: { $0.id == snapshot.id })
+            let group: CohortGroup
+            let created: Bool
+            if let existing {
+                group = existing
+                created = false
+            } else {
+                group = CohortGroup(name: snapshot.name, colorHex: snapshot.colorHex)
+                group.id = snapshot.id
+                groups.append(group)
+                created = true
+            }
+            group.name = snapshot.name
+            group.colorHex = snapshot.colorHex
+            groups.sort { $0.name < $1.name }
+            groupRecordNameByID[snapshot.id] = snapshot.recordName
+
+            do {
+                try await saveGroupRecord(group)
+                return true
+            } catch {
+                if created {
+                    groups.removeAll { $0.id == snapshot.id }
+                }
+                lastErrorMessage = "Failed to restore group: \(error.localizedDescription)"
+                return false
+            }
+        } catch {
+            lastErrorMessage = "Failed to restore group: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func restoreDeletedGroup(_ bundle: GroupUndoBundle) async -> Bool {
+        guard await restoreGroupSnapshot(bundle.group) else { return false }
+        var succeeded = true
+        for membership in bundle.memberships {
+            succeeded = await restoreMembershipSnapshot(membership) && succeeded
+        }
+        let affectedStudentIDs = Set(bundle.memberships.map(\.studentID)).union(bundle.affectedStudentIDs)
+        for studentID in affectedStudentIDs {
+            guard let student = students.first(where: { $0.id == studentID }) else { continue }
+            refreshLegacyGroupConvenience(for: student)
+            do {
+                try await saveStudentRecord(student)
+            } catch {
+                lastErrorMessage = "Failed to restore student group convenience field: \(error.localizedDescription)"
+                succeeded = false
+            }
+        }
+        return succeeded
+    }
+
+    private func deleteDomainByID(_ domainID: UUID) async -> Bool {
+        guard let domain = domains.first(where: { $0.id == domainID }) else { return true }
+        await withUndoCaptureSuppressed {
+            await deleteDomain(domain)
+        }
+        return domains.contains(where: { $0.id == domainID }) == false
+    }
+
+    private func restoreDomainSnapshot(_ snapshot: CloudKitStoreSnapshot.Domain) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        do {
+            _ = try await ensureCohortRecordIDForWrite()
+            let existing = domains.first(where: { $0.id == snapshot.id })
+            let domain: Domain
+            let created: Bool
+            if let existing {
+                domain = existing
+                created = false
+            } else {
+                domain = Domain(name: snapshot.name, colorHex: snapshot.colorHex)
+                domain.id = snapshot.id
+                domains.append(domain)
+                created = true
+            }
+            domain.name = snapshot.name
+            domain.colorHex = snapshot.colorHex
+            domains.sort { $0.name < $1.name }
+            domainRecordNameByID[snapshot.id] = snapshot.recordName
+
+            do {
+                try await saveDomainRecord(domain)
+                return true
+            } catch {
+                if created {
+                    domains.removeAll { $0.id == snapshot.id }
+                }
+                lastErrorMessage = "Failed to restore expertise check: \(error.localizedDescription)"
+                return false
+            }
+        } catch {
+            lastErrorMessage = "Failed to restore expertise check: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func restoreDeletedDomain(_ bundle: DomainUndoBundle) async -> Bool {
+        guard await restoreDomainSnapshot(bundle.domain) else { return false }
+        guard let domain = domains.first(where: { $0.id == bundle.domain.id }) else { return false }
+        var succeeded = true
+        for studentID in bundle.affectedStudentIDs {
+            guard let student = students.first(where: { $0.id == studentID }) else { continue }
+            student.domain = domain
+            do {
+                try await saveStudentRecord(student)
+            } catch {
+                lastErrorMessage = "Failed to restore student expertise check: \(error.localizedDescription)"
+                succeeded = false
+            }
+        }
+        return succeeded
+    }
+
+    private func deleteStudentByID(_ studentID: UUID) async -> Bool {
+        guard let student = students.first(where: { $0.id == studentID }) else { return true }
+        await withUndoCaptureSuppressed {
+            await deleteStudent(student)
+        }
+        return students.contains(where: { $0.id == studentID }) == false
+    }
+
+    private func restoreStudentEditableState(_ bundle: StudentUndoBundle) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        guard let student = await upsertStudentCore(bundle.student) else { return false }
+        guard await applyStudentCustomProperties(student: student, snapshots: bundle.customProperties) else { return false }
+        let groupIDs = Array(Set(bundle.memberships.map(\.groupID))).sorted { $0.uuidString < $1.uuidString }
+        return await applyStudentGroupSelection(studentID: student.id, groupIDs: groupIDs)
+    }
+
+    private func restoreDeletedStudent(_ bundle: StudentUndoBundle) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        guard let student = await upsertStudentCore(bundle.student) else { return false }
+        guard await applyStudentCustomProperties(student: student, snapshots: bundle.customProperties) else { return false }
+
+        do {
+            try await deleteProgress(for: student)
+        } catch {
+            lastErrorMessage = "Failed to clear existing progress before restore: \(error.localizedDescription)"
+            return false
+        }
+        for progress in student.progressRecords {
+            progressRecordNameByID.removeValue(forKey: progress.id)
+        }
+        student.progressRecords.removeAll()
+
+        var succeeded = true
+        for progressSnapshot in bundle.progress {
+            succeeded = await upsertProgressSnapshot(progressSnapshot) && succeeded
+        }
+
+        do {
+            try await deleteMemberships(forStudentID: student.id)
+        } catch {
+            lastErrorMessage = "Failed to clear existing memberships before restore: \(error.localizedDescription)"
+            return false
+        }
+        for membershipSnapshot in bundle.memberships {
+            succeeded = await restoreMembershipSnapshot(membershipSnapshot) && succeeded
+        }
+
+        refreshLegacyGroupConvenience(for: student)
+        do {
+            try await saveStudentRecord(student)
+        } catch {
+            lastErrorMessage = "Failed to restore student legacy group convenience field: \(error.localizedDescription)"
+            succeeded = false
+        }
+        return succeeded
+    }
+
+    private func upsertStudentCore(_ snapshot: CloudKitStoreSnapshot.Student) async -> Student? {
+        do {
+            _ = try await ensureCohortRecordIDForWrite()
+            let existing = students.first(where: { $0.id == snapshot.id })
+            let student: Student
+            if let existing {
+                student = existing
+            } else {
+                student = Student(name: snapshot.name, group: nil, session: .morning, domain: nil)
+                student.id = snapshot.id
+                students.append(student)
+                students.sort { $0.createdAt < $1.createdAt }
+            }
+            student.name = snapshot.name
+            student.createdAt = snapshot.createdAt
+            student.session = Session(rawValue: snapshot.sessionRawValue) ?? .morning
+            student.group = snapshot.groupID.flatMap { groupID in
+                groups.first(where: { $0.id == groupID })
+            }
+            student.domain = snapshot.domainID.flatMap { domainID in
+                domains.first(where: { $0.id == domainID })
+            }
+            studentRecordNameByID[snapshot.id] = snapshot.recordName
+
+            do {
+                try await saveStudentRecord(student)
+                return student
+            } catch {
+                lastErrorMessage = "Failed to restore student: \(error.localizedDescription)"
+                return nil
+            }
+        } catch {
+            lastErrorMessage = "Failed to restore student: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private func applyStudentCustomProperties(
+        student: Student,
+        snapshots: [UndoCustomPropertySnapshot]
+    ) async -> Bool {
+        do {
+            try await deleteCustomProperties(for: student)
+        } catch {
+            lastErrorMessage = "Failed to clear custom properties before restore: \(error.localizedDescription)"
+            return false
+        }
+
+        for property in student.customProperties {
+            customPropertyRecordNameByID.removeValue(forKey: property.id)
+        }
+        student.customProperties.removeAll()
+
+        for snapshot in snapshots.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            let property = StudentCustomProperty(key: snapshot.key, value: snapshot.value, sortOrder: snapshot.sortOrder)
+            property.id = snapshot.id
+            property.student = student
+            student.customProperties.append(property)
+            customPropertyRecordNameByID[snapshot.id] = snapshot.recordName
+            do {
+                try await saveCustomProperty(property, student: student)
+            } catch {
+                lastErrorMessage = "Failed to restore custom property: \(error.localizedDescription)"
+                return false
+            }
+        }
+
+        customPropertiesLoadedStudentIDs.insert(student.id)
+        return true
+    }
+
+    private func applyStudentGroupSelection(studentID: UUID, groupIDs: [UUID]) async -> Bool {
+        guard let student = students.first(where: { $0.id == studentID }) else { return false }
+        let desired = groupIDs.compactMap { targetID in
+            groups.first(where: { $0.id == targetID })
+        }
+        if desired.count != groupIDs.count {
+            lastErrorMessage = "Unable to restore one or more group memberships because the group no longer exists."
+            return false
+        }
+
+        do {
+            try await setGroupsInternal(for: student, groups: desired, updateLegacyGroupField: true)
+            let restored = explicitGroupIDs(for: student)
+            return restored == groupIDs.sorted { $0.uuidString < $1.uuidString }
+        } catch {
+            lastErrorMessage = "Failed to restore student groups: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func restoreMembershipSnapshot(_ snapshot: CloudKitStoreSnapshot.Membership) async -> Bool {
+        guard let student = students.first(where: { $0.id == snapshot.studentID }) else { return false }
+        guard let group = groups.first(where: { $0.id == snapshot.groupID }) else { return false }
+
+        let membership: StudentGroupMembership
+        if let existing = memberships.first(where: { $0.id == snapshot.id }) {
+            membership = existing
+            membership.student = student
+            membership.group = group
+            membership.createdAt = snapshot.createdAt
+            membership.updatedAt = snapshot.updatedAt
+        } else {
+            membership = StudentGroupMembership(
+                student: student,
+                group: group,
+                createdAt: snapshot.createdAt,
+                updatedAt: snapshot.updatedAt
+            )
+            membership.id = snapshot.id
+            memberships.append(membership)
+            memberships = uniqueMemberships(memberships)
+        }
+
+        membershipRecordNameByID[snapshot.id] = snapshot.recordName
+        do {
+            try await saveMembershipRecord(membership, student: student, group: group)
+            return true
+        } catch {
+            lastErrorMessage = "Failed to restore group membership: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func restoreLearningObjectiveSnapshot(_ snapshot: CloudKitStoreSnapshot.LearningObjective) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        do {
+            _ = try await ensureCohortRecordIDForWrite()
+            let existing = allLearningObjectives.first(where: { $0.id == snapshot.id })
+            let objective: LearningObjective
+            let created: Bool
+            if let existing {
+                objective = existing
+                created = false
+            } else {
+                objective = LearningObjective(
+                    code: snapshot.code,
+                    title: snapshot.title,
+                    description: snapshot.objectiveDescription,
+                    isQuantitative: snapshot.isQuantitative,
+                    parentCode: snapshot.parentCode,
+                    parentId: snapshot.parentId,
+                    sortOrder: snapshot.sortOrder,
+                    isArchived: snapshot.isArchived
+                )
+                objective.id = snapshot.id
+                allLearningObjectives.append(objective)
+                created = true
+            }
+
+            objective.code = snapshot.code
+            objective.title = snapshot.title
+            objective.objectiveDescription = snapshot.objectiveDescription
+            objective.isQuantitative = snapshot.isQuantitative
+            objective.parentCode = snapshot.parentCode
+            objective.parentId = snapshot.parentId
+            objective.sortOrder = snapshot.sortOrder
+            objective.isArchived = snapshot.isArchived
+            learningObjectiveRecordNameByID[snapshot.id] = snapshot.recordName
+            setLearningObjectives(allLearningObjectives)
+
+            do {
+                try await saveLearningObjectiveRecord(objective)
+                return true
+            } catch {
+                if created {
+                    allLearningObjectives.removeAll { $0.id == snapshot.id }
+                    setLearningObjectives(allLearningObjectives)
+                }
+                lastErrorMessage = "Failed to restore learning objective: \(error.localizedDescription)"
+                return false
+            }
+        } catch {
+            lastErrorMessage = "Failed to restore learning objective: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func restoreProgressSnapshot(_ snapshot: CloudKitStoreSnapshot.ObjectiveProgress) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        return await upsertProgressSnapshot(snapshot)
+    }
+
+    private func upsertProgressSnapshot(_ snapshot: CloudKitStoreSnapshot.ObjectiveProgress) async -> Bool {
+        guard let student = students.first(where: { $0.id == snapshot.studentID }) else { return false }
+        guard let cohortRecordID = try? await ensureCohortRecordIDForWrite() else {
+            lastErrorMessage = "Unable to resolve cohort record while restoring progress."
+            return false
+        }
+        let studentRecordID = recordID(for: student, lookup: studentRecordNameByID)
+        let objective = snapshot.objectiveId.flatMap { objectiveByID($0) } ?? objectiveByCode(snapshot.objectiveCode)
+
+        let progress: ObjectiveProgress
+        if let existing = student.progressRecords.first(where: { $0.id == snapshot.id }) {
+            progress = existing
+        } else {
+            progress = ObjectiveProgress(
+                objectiveCode: snapshot.objectiveCode,
+                completionPercentage: snapshot.value,
+                notes: snapshot.notes,
+                objectiveId: snapshot.objectiveId,
+                value: snapshot.value
+            )
+            progress.id = snapshot.id
+            progress.student = student
+            student.progressRecords.append(progress)
+        }
+
+        progress.objectiveId = snapshot.objectiveId
+        progress.objectiveCode = snapshot.objectiveCode
+        progress.value = snapshot.value
+        progress.completionPercentage = snapshot.value
+        progress.notes = snapshot.notes
+        progress.lastUpdated = snapshot.lastUpdated
+        progress.status = ProgressStatus(rawValue: snapshot.statusRawValue)
+            ?? ObjectiveProgress.calculateStatus(from: snapshot.value)
+
+        progressRecordNameByID[snapshot.id] = snapshot.recordName
+
+        let progressRecordID = CKRecord.ID(recordName: snapshot.recordName)
+        markRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: progressRecordID.recordName)
+        let record = CKRecord(recordType: RecordType.objectiveProgress, recordID: progressRecordID)
+        record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let studentRef = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        record[Field.studentRef] = studentRef
+        record[Field.student] = CKRecord.Reference(recordID: studentRecordID, action: .none)
+        record[Field.objectiveCode] = progress.objectiveCode
+        record[Field.value] = progress.value
+        record[Field.completionPercentage] = progress.completionPercentage
+        record[Field.status] = progress.status.rawValue
+        record[Field.notes] = progress.notes
+        record[Field.lastUpdated] = progress.lastUpdated
+        if let objective {
+            let objectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+            record[Field.objectiveRef] = CKRecord.Reference(recordID: objectiveRecordID, action: .none)
+        } else {
+            record[Field.objectiveRef] = nil
+        }
+        applyAuditFields(to: record, createdAt: progress.lastUpdated)
+
+        do {
+            let saved = try await service.save(record: record)
+            progressRecordNameByID[snapshot.id] = saved.recordID.recordName
+            progressLoadedStudentIDs.insert(student.id)
+            markRecordRecentlyWritten(recordType: RecordType.objectiveProgress, recordName: saved.recordID.recordName)
+            rebuildProgressCaches()
+            return true
+        } catch {
+            lastErrorMessage = "Failed to restore progress: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func deleteProgressBySnapshot(_ snapshot: CloudKitStoreSnapshot.ObjectiveProgress) async -> Bool {
+        guard await requireWriteAccess() else { return false }
+        if let student = students.first(where: { $0.id == snapshot.studentID }) {
+            student.progressRecords.removeAll { $0.id == snapshot.id }
+        }
+        progressRecordNameByID.removeValue(forKey: snapshot.id)
+        do {
+            try await service.delete(recordID: CKRecord.ID(recordName: snapshot.recordName))
+        } catch {
+            if isUnknownItemError(error) == false {
+                lastErrorMessage = "Failed to delete progress during undo: \(error.localizedDescription)"
+                rebuildProgressCaches()
+                return false
+            }
+        }
+        rebuildProgressCaches()
+        syncCoordinator?.noteLocalWrite()
+        return true
+    }
+
+    private func isUnknownItemError(_ error: Error) -> Bool {
+        guard let ckError = error as? CKError else { return false }
+        return ckError.code == .unknownItem
     }
 
     func openICloudSettings() {
@@ -2850,6 +3990,8 @@ final class CloudKitStore: ObservableObject {
             syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public)")
 
             // Upsert order matters: groups/domains first, then students, then child records.
+            isApplyingRemoteChanges = true
+            defer { isApplyingRemoteChanges = false }
             if groupRecords.isEmpty == false {
                 syncLogger.info("Applying \(groupRecords.count, privacy: .public) group changes")
                 applyGroupChanges(groupRecords)
@@ -2903,6 +4045,8 @@ final class CloudKitStore: ObservableObject {
     func fetchAndApplyRemoteRecord(recordType: String, recordID: CKRecord.ID) async {
         do {
             let record = try await service.fetchRecord(with: recordID)
+            isApplyingRemoteChanges = true
+            defer { isApplyingRemoteChanges = false }
             applyRemoteUpsert(recordType: recordType, record: record)
         } catch {
             // If the record can't be fetched (e.g., deleted quickly), allow reconcile/poll to handle eventual consistency.
@@ -2910,6 +4054,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     func applyRemoteDeletion(recordType: String, recordID: CKRecord.ID) {
+        isApplyingRemoteChanges = true
+        defer { isApplyingRemoteChanges = false }
         switch recordType {
         case RecordType.cohortGroup:
             deleteGroupByRecordID(recordID)
@@ -2962,6 +4108,8 @@ final class CloudKitStore: ObservableObject {
             syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
 
             // Apply ALL remote records - handles adds AND updates
+            isApplyingRemoteChanges = true
+            defer { isApplyingRemoteChanges = false }
             if remoteGroups.isEmpty == false {
                 applyGroupChanges(remoteGroups)
             }
@@ -3120,6 +4268,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyRemoteUpsert(recordType: String, record: CKRecord) {
+        isApplyingRemoteChanges = true
+        defer { isApplyingRemoteChanges = false }
         switch recordType {
         case RecordType.cohortGroup:
             applyGroupChanges([record])
@@ -3376,7 +4526,9 @@ final class CloudKitStore: ObservableObject {
 
             for record in studentRecords {
                 let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
-                let objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+                let objectiveId: UUID? = objectiveRef.flatMap { reference in
+                    self.objectiveID(forRecordName: reference.recordID.recordName)
+                }
                 var objectiveCode = record[Field.objectiveCode] as? String ?? ""
                 if objectiveCode.isEmpty, let objectiveId, let objective = objectiveByID(objectiveId) {
                     objectiveCode = objective.code

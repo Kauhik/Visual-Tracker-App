@@ -463,12 +463,11 @@ struct StudentOverviewBoard: View {
         Task {
             if let newStudent = await store.addStudent(
                 name: trimmed,
-                group: nil,
+                groups: groups,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             ) {
-                await store.setGroups(for: newStudent, groups: groups, updateLegacyGroupField: true)
                 selectedStudentId = newStudent.id
             }
         }
@@ -497,12 +496,11 @@ struct StudentOverviewBoard: View {
             await store.updateStudent(
                 student,
                 name: trimmed,
-                group: nil,
+                groups: groups,
                 session: session,
                 domain: domain,
                 customProperties: customProperties
             )
-            await store.setGroups(for: student, groups: groups, updateLegacyGroupField: true)
             studentToEdit = nil
         }
     }
