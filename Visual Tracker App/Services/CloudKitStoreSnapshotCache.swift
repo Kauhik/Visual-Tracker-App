@@ -14,6 +14,9 @@ struct CloudKitStoreSnapshot: Codable {
         let id: UUID
         let name: String
         let colorHex: String?
+        let progressMode: String?
+        let criteriaProgressUpdatedAt: Date?
+        let criteriaProgressEditedByDisplayName: String?
         let recordName: String
     }
 
@@ -43,6 +46,10 @@ struct CloudKitStoreSnapshot: Codable {
         let sessionRawValue: String
         let groupID: UUID?
         let domainID: UUID?
+        let overallProgressMode: String?
+        let overallManualProgress: Int?
+        let overallManualProgressUpdatedAt: Date?
+        let overallManualProgressEditedByDisplayName: String?
         let recordName: String
     }
 
@@ -67,6 +74,18 @@ struct CloudKitStoreSnapshot: Codable {
         let recordName: String
     }
 
+    struct ExpertiseCheckProgress: Codable {
+        let id: UUID
+        let domainID: UUID
+        let objectiveId: UUID?
+        let objectiveCode: String
+        let value: Int
+        let statusRawValue: String
+        let updatedAt: Date
+        let editedByDisplayName: String?
+        let recordName: String
+    }
+
     let schemaVersion: Int
     let savedAt: Date
     let cohortRecordName: String?
@@ -78,6 +97,7 @@ struct CloudKitStoreSnapshot: Codable {
     let students: [Student]
     let memberships: [Membership]
     let objectiveProgress: [ObjectiveProgress]
+    let expertiseCheckProgress: [ExpertiseCheckProgress]?
 }
 
 enum CloudKitStoreSnapshotCache {

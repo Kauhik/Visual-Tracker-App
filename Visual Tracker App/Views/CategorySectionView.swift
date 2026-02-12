@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CategorySectionView: View {
     let categoryObjective: LearningObjective
-    let student: Student
+    let context: ObjectiveProgressEditingContext
     let allObjectives: [LearningObjective]
 
     @EnvironmentObject private var store: CloudKitStore
@@ -12,13 +12,19 @@ struct CategorySectionView: View {
 
     @State private var isExpanded: Bool = true
     @State private var isHeaderHovering: Bool = false
+    @State private var showingHeaderEditor: Bool = false
 
     private var childObjectives: [LearningObjective] {
         store.childObjectives(of: categoryObjective)
     }
 
     private var aggregatePercentage: Int {
-        store.objectivePercentage(student: student, objective: categoryObjective)
+        switch context {
+        case .student(let student):
+            return store.objectivePercentage(student: student, objective: categoryObjective)
+        case .expertiseCheck(let domain):
+            return store.expertiseCheckObjectivePercentage(domain: domain, objective: categoryObjective)
+        }
     }
 
     private var aggregateStatus: ProgressStatus {
@@ -75,6 +81,10 @@ struct CategorySectionView: View {
                         Text("\(aggregatePercentage)%")
                             .font(.system(.headline, design: .monospaced))
                             .foregroundColor(.secondary)
+
+                        if isEditableAtCategoryLevel {
+                            headerProgressPill
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -96,6 +106,16 @@ struct CategorySectionView: View {
                         isExpanded.toggle()
                     }
                 }
+                if isEditableAtCategoryLevel {
+                    Divider()
+                    Button("Set 0%") { updateCategoryProgress(0) }
+                    Button("Set 25%") { updateCategoryProgress(25) }
+                    Button("Set 50%") { updateCategoryProgress(50) }
+                    Button("Set 75%") { updateCategoryProgress(75) }
+                    Button("Set 100%") { updateCategoryProgress(100) }
+                    Divider()
+                    Button("Custom...") { showingHeaderEditor = true }
+                }
             }
 
             if let formula = formulaDisplay, isExpanded {
@@ -114,7 +134,7 @@ struct CategorySectionView: View {
                     ForEach(childObjectives) { child in
                         ObjectiveTreeView(
                             rootObjective: child,
-                            student: student,
+                            context: context,
                             allObjectives: allObjectives,
                             startIndentLevel: 1
                         )
@@ -137,9 +157,62 @@ struct CategorySectionView: View {
 
     private func objectivePercentage(forCode code: String) -> Int {
         guard let objective = store.objective(forCode: code) else {
-            return student.completionPercentage(for: code)
+            switch context {
+            case .student(let student):
+                return student.completionPercentage(for: code)
+            case .expertiseCheck:
+                return 0
+            }
         }
-        return store.objectivePercentage(student: student, objective: objective)
+        switch context {
+        case .student(let student):
+            return store.objectivePercentage(student: student, objective: objective)
+        case .expertiseCheck(let domain):
+            return store.expertiseCheckObjectivePercentage(domain: domain, objective: objective)
+        }
     }
 
+    private var isEditableAtCategoryLevel: Bool {
+        guard childObjectives.isEmpty else { return false }
+        if case .expertiseCheck = context {
+            return true
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private var headerProgressPill: some View {
+        Button {
+            showingHeaderEditor = true
+        } label: {
+            HStack(spacing: zoomManager.scaled(4)) {
+                Text(aggregateStatus.rawValue)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+            .padding(.horizontal, zoomManager.scaled(8))
+            .padding(.vertical, zoomManager.scaled(4))
+            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+            .overlay(Capsule().stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showingHeaderEditor, arrowEdge: .trailing) {
+            ProgressEditorView(
+                title: categoryObjective.code,
+                currentValue: aggregatePercentage,
+                onSave: { newValue in
+                    updateCategoryProgress(newValue)
+                }
+            )
+        }
+    }
+
+    private func updateCategoryProgress(_ newPercentage: Int) {
+        guard case .expertiseCheck(let domain) = context else { return }
+        Task {
+            await store.setExpertiseCheckCriteriaProgress(domain: domain, objective: categoryObjective, value: newPercentage)
+        }
+    }
 }

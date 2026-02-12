@@ -6,12 +6,21 @@ enum Session: String, Codable, CaseIterable {
     case afternoon = "Afternoon"
 }
 
+enum OverallProgressMode: String, Codable, CaseIterable {
+    case computed = "computed"
+    case manual = "manual"
+}
+
 @Model
 final class Student {
     @Attribute(.unique) var id: UUID
     var name: String
     var createdAt: Date
     var session: Session
+    var overallProgressMode: String?
+    var overallManualProgress: Int?
+    var overallManualProgressUpdatedAt: Date?
+    var overallManualProgressEditedByDisplayName: String?
 
     @Relationship(deleteRule: .cascade, inverse: \ObjectiveProgress.student)
     var progressRecords: [ObjectiveProgress] = []
@@ -35,6 +44,14 @@ final class Student {
         self.group = group
         self.session = session
         self.domain = domain
+        self.overallProgressMode = nil
+        self.overallManualProgress = nil
+        self.overallManualProgressUpdatedAt = nil
+        self.overallManualProgressEditedByDisplayName = nil
+    }
+
+    var resolvedOverallProgressMode: OverallProgressMode {
+        OverallProgressMode(rawValue: overallProgressMode ?? "") ?? .computed
     }
 
     func progress(for objectiveCode: String) -> ObjectiveProgress? {

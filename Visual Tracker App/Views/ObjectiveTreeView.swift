@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ObjectiveTreeView: View {
     let rootObjective: LearningObjective
-    let student: Student
+    let context: ObjectiveProgressEditingContext
     let allObjectives: [LearningObjective]
     let startIndentLevel: Int
 
@@ -25,7 +25,7 @@ struct ObjectiveTreeView: View {
             // Display the root objective
             ObjectiveRowView(
                 objective: rootObjective,
-                student: student,
+                context: context,
                 allObjectives: allObjectives,
                 indentLevel: startIndentLevel
             )
@@ -34,7 +34,7 @@ struct ObjectiveTreeView: View {
             ForEach(childObjectives) { child in
                 ObjectiveTreeView(
                     rootObjective: child,
-                    student: student,
+                    context: context,
                     allObjectives: allObjectives,
                     startIndentLevel: startIndentLevel + 1
                 )

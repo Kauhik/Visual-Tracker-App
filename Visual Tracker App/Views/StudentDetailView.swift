@@ -27,15 +27,38 @@ struct StudentDetailView: View {
     private var domains: [Domain] { store.domains }
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
+    private var selectedScope: StudentFilterScope {
+        store.selectedScope
+    }
+
+    private var selectedExpertiseCheck: Domain? {
+        guard case .domain(let id) = selectedScope else { return nil }
+        return domains.first(where: { $0.id == id })
+    }
+
+    private var isEditingExpertiseCriteria: Bool {
+        guard let selectedExpertiseCheck else { return false }
+        return store.isCriteriaModeActive(for: selectedExpertiseCheck)
+    }
+
+    private var activeObjectiveEditingContext: ObjectiveProgressEditingContext? {
+        if isEditingExpertiseCriteria, let selectedExpertiseCheck {
+            return .expertiseCheck(selectedExpertiseCheck)
+        }
+        if let selectedStudent {
+            return .student(selectedStudent)
+        }
+        return nil
+    }
+
     private var displayMode: DisplayMode {
+        if isEditingExpertiseCriteria {
+            return .overview
+        }
         if let selectedStudent {
             return .student(selectedStudent)
         }
         return .overview
-    }
-
-    private var selectedScope: StudentFilterScope {
-        store.selectedScope
     }
 
     private var rootCategories: [LearningObjective] {
@@ -143,7 +166,12 @@ struct StudentDetailView: View {
                 return store.groupOverallProgress(group: group, students: students)
             }
             return store.cohortOverallProgress(students: filteredStudents)
-        case .domain, .noDomain:
+        case .domain(let id):
+            guard let domain = domains.first(where: { $0.id == id }) else {
+                return store.cohortOverallProgress(students: filteredStudents)
+            }
+            return store.expertiseCheckOverallProgress(for: domain)
+        case .noDomain:
             return store.cohortOverallProgress(students: filteredStudents)
         }
     }
@@ -169,9 +197,19 @@ struct StudentDetailView: View {
     private var headerOverallProgress: Int {
         switch displayMode {
         case .student(let student):
-            return store.studentOverallProgress(student: student)
+            return store.effectiveOverallProgress(for: student)
         case .overview:
             return scopeOverallProgress
+        }
+    }
+
+    private var headerModeBadgeText: String? {
+        guard let selectedExpertiseCheck else { return nil }
+        switch selectedExpertiseCheck.resolvedProgressMode {
+        case .computed:
+            return "Computed"
+        case .criteria:
+            return "By Criteria"
         }
     }
 
@@ -203,9 +241,16 @@ struct StudentDetailView: View {
 
                 studentBoardSection
 
-                if let student = selectedStudent, eligibleStudentCount > 0 {
+                if let context = activeObjectiveEditingContext,
+                   eligibleStudentCount > 0 || isEditingExpertiseCriteria {
                     legendView
                         .padding(.top, zoomManager.scaled(2))
+
+                    if isEditingExpertiseCriteria {
+                        editingContextBanner(text: "Editing: Expertise Check criteria progress")
+                    } else {
+                        editingContextBanner(text: "Editing: Student progress")
+                    }
 
                     Divider()
                         .opacity(0.25)
@@ -213,7 +258,7 @@ struct StudentDetailView: View {
                     ForEach(rootCategories) { category in
                         CategorySectionView(
                             categoryObjective: category,
-                            student: student,
+                            context: context,
                             allObjectives: allObjectives
                         )
                     }
@@ -304,7 +349,7 @@ struct StudentDetailView: View {
             }
         }
         .task(id: selectedStudent?.id) {
-            if let selectedStudent {
+            if let selectedStudent, isEditingExpertiseCriteria == false {
                 await activityCenter.run(message: "Loading student details…", tag: .detail) {
                     await store.loadProgressIfNeeded(for: selectedStudent)
                     await store.loadCustomPropertiesIfNeeded(for: selectedStudent)
@@ -317,7 +362,11 @@ struct StudentDetailView: View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(14)) {
             overviewHeaderRow
 
-            if eligibleStudentCount == 0 {
+            if let selectedExpertiseCheck {
+                expertiseCheckModeSection(for: selectedExpertiseCheck)
+            }
+
+            if eligibleStudentCount == 0 && isEditingExpertiseCriteria == false {
                 Divider()
                     .opacity(0.22)
 
@@ -349,7 +398,7 @@ struct StudentDetailView: View {
 
     private var overviewHeaderRow: some View {
         HStack(spacing: zoomManager.scaled(16)) {
-            if let selectedStudent {
+            if let selectedStudent, isEditingExpertiseCriteria == false {
                 studentAvatar(for: selectedStudent)
             } else {
                 ZStack {
@@ -393,6 +442,16 @@ struct StudentDetailView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                if let headerModeBadgeText {
+                    Text(headerModeBadgeText)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, zoomManager.scaled(8))
+                        .padding(.vertical, zoomManager.scaled(3))
+                        .background(Capsule().fill(Color.accentColor.opacity(0.14)))
+                        .foregroundColor(.accentColor)
+                }
+
                 HStack(spacing: zoomManager.scaled(8)) {
                     Text("\(headerOverallProgress)%")
                         .font(zoomManager.scaledFont(size: 36, weight: .bold, design: .rounded))
@@ -430,6 +489,90 @@ struct StudentDetailView: View {
         }
     }
 
+    private func expertiseCheckModeSection(for domain: Domain) -> some View {
+        let computed = store.expertiseCheckComputedOverallProgress(for: domain)
+        let criteria = store.expertiseCheckCriteriaOverallProgress(for: domain)
+        let activeMode = domain.resolvedProgressMode
+        let modeBinding = Binding<ExpertiseCheckProgressMode>(
+            get: { domain.resolvedProgressMode },
+            set: { mode in
+                Task {
+                    await store.setExpertiseCheckProgressMode(domain, mode: mode)
+                }
+            }
+        )
+
+        return VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
+            Text("Expertise Check Overall Mode")
+                .font(.headline)
+
+            Picker("Expertise Check Overall Mode", selection: modeBinding) {
+                Text("Computed").tag(ExpertiseCheckProgressMode.computed)
+                Text("By Criteria").tag(ExpertiseCheckProgressMode.criteria)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: zoomManager.scaled(300))
+
+            VStack(spacing: zoomManager.scaled(6)) {
+                progressModeValueRow(
+                    label: "Computed (Student Average)",
+                    valueText: "\(computed)%",
+                    statusText: activeMode == .computed ? "Active" : "Inactive"
+                )
+                progressModeValueRow(
+                    label: "By Criteria",
+                    valueText: "\(criteria)%",
+                    statusText: activeMode == .criteria ? "Active" : "Inactive"
+                )
+            }
+
+            if let updatedAt = domain.criteriaProgressUpdatedAt {
+                let editedBy = (domain.criteriaProgressEditedByDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? (domain.criteriaProgressEditedByDisplayName ?? "Unknown")
+                    : "Unknown"
+                Text("Last criteria edit: \(editedBy) • \(updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func progressModeValueRow(label: String, valueText: String, statusText: String) -> some View {
+        HStack(spacing: zoomManager.scaled(10)) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            Text(valueText)
+                .font(zoomManager.scaledFont(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(.primary)
+
+            Text(statusText)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .padding(.horizontal, zoomManager.scaled(8))
+                .padding(.vertical, zoomManager.scaled(3))
+                .background(
+                    Capsule()
+                        .fill(statusText == "Active" ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.14))
+                )
+                .foregroundColor(statusText == "Active" ? .accentColor : .secondary)
+        }
+        .padding(.vertical, zoomManager.scaled(6))
+        .padding(.horizontal, zoomManager.scaled(10))
+        .background(
+            RoundedRectangle(cornerRadius: zoomManager.scaled(10))
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: zoomManager.scaled(10))
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+    }
+
     private func overviewCategoryRow(_ category: LearningObjective) -> some View {
         let value: Int
 
@@ -437,7 +580,11 @@ struct StudentDetailView: View {
         case .student(let student):
             value = store.objectivePercentage(student: student, objective: category)
         case .overview:
-            value = store.cohortObjectiveAverage(objective: category, students: breakdownStudents)
+            if let selectedExpertiseCheck, store.isCriteriaModeActive(for: selectedExpertiseCheck) {
+                value = store.expertiseCheckObjectivePercentage(domain: selectedExpertiseCheck, objective: category)
+            } else {
+                value = store.cohortObjectiveAverage(objective: category, students: breakdownStudents)
+            }
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
@@ -524,6 +671,23 @@ struct StudentDetailView: View {
         }
     }
 
+    private func editingContextBanner(text: String) -> some View {
+        HStack(spacing: zoomManager.scaled(8)) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption)
+            Text(text)
+                .font(.caption)
+                .fontWeight(.semibold)
+        }
+        .foregroundColor(.accentColor)
+        .padding(.horizontal, zoomManager.scaled(10))
+        .padding(.vertical, zoomManager.scaled(6))
+        .background(
+            Capsule()
+                .fill(Color.accentColor.opacity(0.14))
+        )
+    }
+
     private var legendView: some View {
         HStack(spacing: zoomManager.scaled(18)) {
             Text("Legend:")
@@ -553,7 +717,7 @@ struct StudentDetailView: View {
 
             Spacer()
 
-            Text("Click the status pill to edit progress")
+            Text(isEditingExpertiseCriteria ? "Editing Expertise Check criteria progress" : "Click the status pill to edit student progress")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -581,16 +745,20 @@ struct StudentDetailView: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: zoomManager.scaled(12)) {
                         ForEach(boardStudents) { boardStudent in
-                            let overall = store.studentOverallProgress(student: boardStudent)
+                            let overall = store.effectiveOverallProgress(for: boardStudent)
 
                             StudentCardView(
                                 student: boardStudent,
                                 overallProgress: overall,
-                                isSelected: selectedStudent?.id == boardStudent.id,
+                                isSelected: isEditingExpertiseCriteria ? false : (selectedStudent?.id == boardStudent.id),
                                 groups: groups,
                                 onSelect: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
-                                        selectedStudent = boardStudent
+                                        if isEditingExpertiseCriteria {
+                                            selectedStudent = nil
+                                        } else {
+                                            selectedStudent = boardStudent
+                                        }
                                     }
                                 },
                                 onRequestDelete: {

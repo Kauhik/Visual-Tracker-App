@@ -24,6 +24,9 @@ extension CloudKitStoreSnapshot.Domain: Equatable {
         lhs.id == rhs.id
             && lhs.name == rhs.name
             && lhs.colorHex == rhs.colorHex
+            && lhs.progressMode == rhs.progressMode
+            && lhs.criteriaProgressUpdatedAt == rhs.criteriaProgressUpdatedAt
+            && lhs.criteriaProgressEditedByDisplayName == rhs.criteriaProgressEditedByDisplayName
             && lhs.recordName == rhs.recordName
     }
 }
@@ -51,6 +54,10 @@ extension CloudKitStoreSnapshot.Student: Equatable {
             && lhs.sessionRawValue == rhs.sessionRawValue
             && lhs.groupID == rhs.groupID
             && lhs.domainID == rhs.domainID
+            && lhs.overallProgressMode == rhs.overallProgressMode
+            && lhs.overallManualProgress == rhs.overallManualProgress
+            && lhs.overallManualProgressUpdatedAt == rhs.overallManualProgressUpdatedAt
+            && lhs.overallManualProgressEditedByDisplayName == rhs.overallManualProgressEditedByDisplayName
             && lhs.recordName == rhs.recordName
     }
 }
@@ -76,6 +83,20 @@ extension CloudKitStoreSnapshot.ObjectiveProgress: Equatable {
             && lhs.notes == rhs.notes
             && lhs.lastUpdated == rhs.lastUpdated
             && lhs.statusRawValue == rhs.statusRawValue
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.ExpertiseCheckProgress: Equatable {
+    static func == (lhs: CloudKitStoreSnapshot.ExpertiseCheckProgress, rhs: CloudKitStoreSnapshot.ExpertiseCheckProgress) -> Bool {
+        lhs.id == rhs.id
+            && lhs.domainID == rhs.domainID
+            && lhs.objectiveId == rhs.objectiveId
+            && lhs.objectiveCode == rhs.objectiveCode
+            && lhs.value == rhs.value
+            && lhs.statusRawValue == rhs.statusRawValue
+            && lhs.updatedAt == rhs.updatedAt
+            && lhs.editedByDisplayName == rhs.editedByDisplayName
             && lhs.recordName == rhs.recordName
     }
 }
@@ -156,6 +177,7 @@ final class CloudKitStore: ObservableObject {
     private var membershipRecordNameByID: [UUID: String] = [:]
     private var progressRecordNameByID: [UUID: String] = [:]
     private var customPropertyRecordNameByID: [UUID: String] = [:]
+    private var expertiseCheckProgressRecordNameByID: [UUID: String] = [:]
     private var allLearningObjectives: [LearningObjective] = []
     private var pendingGroupCreateIDs: Set<UUID> = []
     private var pendingDomainCreateIDs: Set<UUID> = []
@@ -179,6 +201,11 @@ final class CloudKitStore: ObservableObject {
     private var objectiveAggregateByStudentID: [UUID: [UUID: Int]] = [:]
     private var studentOverallProgressByID: [UUID: Int] = [:]
     private var cohortOverallProgressCache: Int = 0
+    private var expertiseCheckProgressRecords: [ExpertiseCheckProgress] = []
+    private var criteriaValuesByDomainObjectiveID: [UUID: [UUID: Int]] = [:]
+    private var criteriaValuesByDomainObjectiveCode: [UUID: [String: Int]] = [:]
+    private var criteriaAggregateByDomainID: [UUID: [UUID: Int]] = [:]
+    private var criteriaOverallProgressByDomainID: [UUID: Int] = [:]
     private let maxUndoHistorySize: Int = 50
     private var undoStack: [UndoOperation] = []
     private var redoStack: [UndoOperation] = []
@@ -473,6 +500,10 @@ final class CloudKitStore: ObservableObject {
                 ofType: RecordType.objectiveProgress,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
             )
+            async let expertiseCheckCriteriaRecords = service.queryRecords(
+                ofType: RecordType.expertiseCheckProgress,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
+            )
 
             let (
                 fetchedGroupRecords,
@@ -481,7 +512,8 @@ final class CloudKitStore: ObservableObject {
                 fetchedLearningObjectiveRecords,
                 fetchedMembershipRecords,
                 fetchedStudentRecords,
-                fetchedProgressRecords
+                fetchedProgressRecords,
+                fetchedExpertiseCheckCriteriaRecords
             ) = try await (
                 groupRecords,
                 domainRecords,
@@ -489,7 +521,8 @@ final class CloudKitStore: ObservableObject {
                 learningObjectiveRecords,
                 membershipRecords,
                 studentRecords,
-                progressRecords
+                progressRecords,
+                expertiseCheckCriteriaRecords
             )
 
             clearRecordTrackingStateForFullReload()
@@ -503,6 +536,9 @@ final class CloudKitStore: ObservableObject {
             let domainMap = dictionaryByRecordName(items: mappedDomains, recordNameLookup: domainRecordNameByID)
             let mappedStudents = fetchedStudentRecords.map { mapStudent(from: $0, groupMap: groupMap, domainMap: domainMap) }
             let studentMap = dictionaryByRecordName(items: mappedStudents, recordNameLookup: studentRecordNameByID)
+            let mappedExpertiseCheckProgress = fetchedExpertiseCheckCriteriaRecords.compactMap { record in
+                mapExpertiseCheckProgress(from: record, domainMap: domainMap)
+            }
             let mappedMemberships = fetchedMembershipRecords.compactMap { record in
                 mapMembership(from: record, studentMap: studentMap, groupMap: groupMap)
             }
@@ -522,6 +558,7 @@ final class CloudKitStore: ObservableObject {
             mergeFetchedCategoryLabels(mappedLabels)
             memberships = uniqueMemberships(mappedMemberships)
             students = mappedStudents.sorted { $0.createdAt < $1.createdAt }
+            expertiseCheckProgressRecords = deduplicatedExpertiseCheckProgress(mappedExpertiseCheckProgress)
             if mappedLearningObjectives.isEmpty {
                 setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
             } else {
@@ -767,6 +804,7 @@ final class CloudKitStore: ObservableObject {
         domains.removeAll { $0.id == domain.id }
 
         do {
+            try await deleteExpertiseCheckProgress(for: domain)
             try await service.delete(recordID: recordID)
             for student in affected {
                 try await saveStudentRecord(student)
@@ -934,6 +972,144 @@ final class CloudKitStore: ObservableObject {
         } catch {
             student.name = previousName
             lastErrorMessage = "Failed to rename student: \(error.localizedDescription)"
+        }
+    }
+
+    func setOverallProgressMode(_ student: Student, mode: OverallProgressMode) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+
+        let previousMode = student.overallProgressMode
+        let nextMode = mode.rawValue
+        guard normalizedOverallProgressMode(previousMode) != nextMode else { return }
+
+        objectWillChange.send()
+        student.overallProgressMode = nextMode
+
+        do {
+            try await saveStudentRecord(student)
+        } catch {
+            student.overallProgressMode = previousMode
+            lastErrorMessage = "Failed to update overall mode: \(error.localizedDescription)"
+        }
+    }
+
+    func setManualOverallProgress(_ student: Student, value: Int) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+
+        let clampedValue = min(100, max(0, value))
+        let previousValue = student.overallManualProgress
+        let previousUpdatedAt = student.overallManualProgressUpdatedAt
+        let previousEditedBy = student.overallManualProgressEditedByDisplayName
+        guard previousValue != clampedValue else { return }
+
+        objectWillChange.send()
+        student.overallManualProgress = clampedValue
+        student.overallManualProgressUpdatedAt = Date()
+        student.overallManualProgressEditedByDisplayName = editorDisplayName()
+
+        do {
+            try await saveStudentRecord(student)
+        } catch {
+            student.overallManualProgress = previousValue
+            student.overallManualProgressUpdatedAt = previousUpdatedAt
+            student.overallManualProgressEditedByDisplayName = previousEditedBy
+            lastErrorMessage = "Failed to update manual overall progress: \(error.localizedDescription)"
+        }
+    }
+
+    func setExpertiseCheckProgressMode(_ domain: Domain, mode: ExpertiseCheckProgressMode) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        let previousMode = domain.progressMode
+        let previousUpdatedAt = domain.criteriaProgressUpdatedAt
+        let previousEditedBy = domain.criteriaProgressEditedByDisplayName
+        let previousSelectedStudentID = selectedStudentId
+        let nextMode = mode.rawValue
+        guard normalizedExpertiseCheckProgressMode(previousMode) != nextMode else { return }
+
+        objectWillChange.send()
+        domain.progressMode = nextMode
+        forceOverallSelectionIfNeeded(forExpertiseCheckID: domain.id)
+        if mode == .criteria {
+            domain.criteriaProgressUpdatedAt = Date()
+            domain.criteriaProgressEditedByDisplayName = editorDisplayName()
+        }
+
+        do {
+            try await saveDomainRecord(domain)
+        } catch {
+            domain.progressMode = previousMode
+            domain.criteriaProgressUpdatedAt = previousUpdatedAt
+            domain.criteriaProgressEditedByDisplayName = previousEditedBy
+            selectedStudentId = previousSelectedStudentID
+            lastErrorMessage = "Failed to update expertise check mode: \(error.localizedDescription)"
+        }
+    }
+
+    func setExpertiseCheckCriteriaProgress(domain: Domain, objective: LearningObjective, value: Int) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        guard let _ = cohortRecordID else { return }
+
+        let canonicalValue = min(100, max(0, value))
+        let previousDomainUpdatedAt = domain.criteriaProgressUpdatedAt
+        let previousDomainEditedBy = domain.criteriaProgressEditedByDisplayName
+        let previousMode = domain.progressMode
+        let previousSelectedStudentID = selectedStudentId
+        let editedBy = editorDisplayName()
+
+        let existing = expertiseCheckProgressEntry(domainID: domain.id, objective: objective)
+        let previousEntrySnapshot: (value: Int, updatedAt: Date, status: ProgressStatus, editedBy: String?)? = existing.map {
+            ($0.value, $0.updatedAt, $0.status, $0.editedByDisplayName)
+        }
+        let entry: ExpertiseCheckProgress
+        let created: Bool
+        if let existing {
+            entry = existing
+            created = false
+            guard existing.value != canonicalValue else { return }
+            existing.updateValue(canonicalValue, editedByDisplayName: editedBy)
+        } else {
+            entry = ExpertiseCheckProgress(
+                domainId: domain.id,
+                objectiveId: objective.id,
+                objectiveCode: objective.code,
+                value: canonicalValue,
+                updatedAt: Date(),
+                editedByDisplayName: editedBy
+            )
+            expertiseCheckProgressRecords.append(entry)
+            created = true
+        }
+
+        objectWillChange.send()
+        domain.progressMode = ExpertiseCheckProgressMode.criteria.rawValue
+        forceOverallSelectionIfNeeded(forExpertiseCheckID: domain.id)
+        domain.criteriaProgressUpdatedAt = entry.updatedAt
+        domain.criteriaProgressEditedByDisplayName = editedBy
+        rebuildCriteriaProgressCaches()
+
+        do {
+            try await saveExpertiseCheckProgressRecord(entry, domain: domain, objective: objective)
+            try await saveDomainRecord(domain)
+        } catch {
+            if created {
+                expertiseCheckProgressRecords.removeAll { $0.id == entry.id }
+                expertiseCheckProgressRecordNameByID.removeValue(forKey: entry.id)
+            } else if let previous = previousEntrySnapshot {
+                entry.value = previous.value
+                entry.updatedAt = previous.updatedAt
+                entry.status = previous.status
+                entry.editedByDisplayName = previous.editedBy
+            }
+            domain.progressMode = previousMode
+            domain.criteriaProgressUpdatedAt = previousDomainUpdatedAt
+            domain.criteriaProgressEditedByDisplayName = previousDomainEditedBy
+            selectedStudentId = previousSelectedStudentID
+            rebuildCriteriaProgressCaches()
+            lastErrorMessage = "Failed to save expertise check progress: \(error.localizedDescription)"
         }
     }
 
@@ -1436,6 +1612,45 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func expertiseCheckProgressEntry(
+        domainID: UUID,
+        objective: LearningObjective
+    ) -> ExpertiseCheckProgress? {
+        expertiseCheckProgressRecords.first { existing in
+            guard existing.domainId == domainID else { return false }
+            if let objectiveId = existing.objectiveId {
+                return objectiveId == objective.id
+            }
+            return existing.objectiveCode == objective.code
+        }
+    }
+
+    private func saveExpertiseCheckProgressRecord(
+        _ progress: ExpertiseCheckProgress,
+        domain: Domain,
+        objective: LearningObjective
+    ) async throws {
+        guard let cohortRecordID else { return }
+        let domainRecordID = recordID(for: domain, lookup: domainRecordNameByID)
+        let objectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+        let recordID = recordID(for: progress, lookup: expertiseCheckProgressRecordNameByID)
+
+        markRecordRecentlyWritten(recordType: RecordType.expertiseCheckProgress, recordName: recordID.recordName)
+        let record = CKRecord(recordType: RecordType.expertiseCheckProgress, recordID: recordID)
+        record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        record[Field.expertiseCheckRef] = CKRecord.Reference(recordID: domainRecordID, action: .none)
+        record[Field.objectiveRef] = CKRecord.Reference(recordID: objectiveRecordID, action: .none)
+        record[Field.objectiveCode] = progress.objectiveCode
+        record[Field.value] = progress.value
+        record[Field.status] = progress.status.rawValue
+        applyAuditFields(to: record, createdAt: progress.updatedAt)
+
+        let saved = try await service.save(record: record)
+        expertiseCheckProgressRecordNameByID[progress.id] = saved.recordID.recordName
+        markRecordRecentlyWritten(recordType: RecordType.expertiseCheckProgress, recordName: saved.recordID.recordName)
+        syncCoordinator?.noteLocalWrite()
+    }
+
     func loadCustomPropertiesIfNeeded(for student: Student) async {
         lastErrorMessage = nil
         guard customPropertiesLoadedStudentIDs.contains(student.id) == false else { return }
@@ -1472,7 +1687,9 @@ final class CloudKitStore: ObservableObject {
 
             resetProgress = ResetProgress(message: "Deleting objective progress...", step: 1, totalSteps: 10)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
+            try await deleteAllRecords(ofType: RecordType.expertiseCheckProgress, cohortRecordID: cohortRecordID)
             clearLocalObjectiveProgressState()
+            clearLocalExpertiseCheckProgressState()
 
             resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 10)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
@@ -1532,6 +1749,7 @@ final class CloudKitStore: ObservableObject {
 
             resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
+            try await deleteAllRecords(ofType: RecordType.expertiseCheckProgress, cohortRecordID: cohortRecordID)
             resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 7)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
             resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 7)
@@ -1600,6 +1818,9 @@ final class CloudKitStore: ObservableObject {
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.name] = domain.name
         record[Field.colorHex] = domain.colorHex
+        record[Field.progressMode] = normalizedExpertiseCheckProgressMode(domain.progressMode)
+        record[Field.criteriaProgressUpdatedAt] = domain.criteriaProgressUpdatedAt
+        record[Field.criteriaProgressEditedByDisplayName] = domain.criteriaProgressEditedByDisplayName
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         domainRecordNameByID[domain.id] = saved.recordID.recordName
@@ -1666,6 +1887,10 @@ final class CloudKitStore: ObservableObject {
         record[Field.name] = student.name
         record[Field.session] = student.session.rawValue
         record[Field.createdAt] = student.createdAt
+        record[Field.overallProgressMode] = normalizedOverallProgressMode(student.overallProgressMode)
+        record[Field.overallManualProgress] = clampedOverallManualProgress(student.overallManualProgress)
+        record[Field.overallManualProgressUpdatedAt] = student.overallManualProgressUpdatedAt
+        record[Field.overallManualProgressEditedByDisplayName] = student.overallManualProgressEditedByDisplayName
 
         if let group = student.group {
             let groupRecordID = recordID(for: group, lookup: groupRecordNameByID)
@@ -1748,6 +1973,27 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func deleteExpertiseCheckProgress(for domain: Domain) async throws {
+        guard let cohortRecordID else { return }
+        let domainRecordID = recordID(for: domain, lookup: domainRecordNameByID)
+        let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let domainRef = CKRecord.Reference(recordID: domainRecordID, action: .none)
+        let predicate = NSPredicate(
+            format: "cohortRef == %@ AND expertiseCheckRef == %@",
+            cohortRef,
+            domainRef
+        )
+        let records = try await service.queryRecords(ofType: RecordType.expertiseCheckProgress, predicate: predicate)
+        for record in records {
+            try await service.delete(recordID: record.recordID)
+            if let localID = existingID(forRecordName: record.recordID.recordName, lookup: expertiseCheckProgressRecordNameByID) {
+                expertiseCheckProgressRecordNameByID.removeValue(forKey: localID)
+                expertiseCheckProgressRecords.removeAll { $0.id == localID }
+            }
+        }
+        rebuildCriteriaProgressCaches()
+    }
+
     private func deleteAllRecords(ofType recordType: String, cohortRecordID: CKRecord.ID) async throws {
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
@@ -1769,7 +2015,16 @@ final class CloudKitStore: ObservableObject {
     private func mapDomain(from record: CKRecord) -> Domain {
         let name = record[Field.name] as? String ?? "Untitled"
         let colorHex = record[Field.colorHex] as? String
-        let domain = Domain(name: name, colorHex: colorHex)
+        let progressMode = normalizedExpertiseCheckProgressMode(record[Field.progressMode] as? String)
+        let criteriaProgressUpdatedAt = record[Field.criteriaProgressUpdatedAt] as? Date
+        let criteriaProgressEditedByDisplayName = record[Field.criteriaProgressEditedByDisplayName] as? String
+        let domain = Domain(
+            name: name,
+            colorHex: colorHex,
+            progressMode: progressMode,
+            criteriaProgressUpdatedAt: criteriaProgressUpdatedAt,
+            criteriaProgressEditedByDisplayName: criteriaProgressEditedByDisplayName
+        )
         let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
         domain.id = uuid
         domainRecordNameByID[uuid] = record.recordID.recordName
@@ -1856,6 +2111,12 @@ final class CloudKitStore: ObservableObject {
         if let createdAt = record[Field.createdAt] as? Date {
             student.createdAt = createdAt
         }
+        let manualProgress = (record[Field.overallManualProgress] as? Int)
+            ?? (record[Field.overallManualProgress] as? NSNumber)?.intValue
+        student.overallProgressMode = normalizedOverallProgressMode(record[Field.overallProgressMode] as? String)
+        student.overallManualProgress = clampedOverallManualProgress(manualProgress)
+        student.overallManualProgressUpdatedAt = record[Field.overallManualProgressUpdatedAt] as? Date
+        student.overallManualProgressEditedByDisplayName = record[Field.overallManualProgressEditedByDisplayName] as? String
 
         let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: studentRecordNameByID)
         student.id = uuid
@@ -1928,6 +2189,60 @@ final class CloudKitStore: ObservableObject {
         return progress
     }
 
+    private func mapExpertiseCheckProgress(
+        from record: CKRecord,
+        domainMap: [String: Domain]
+    ) -> ExpertiseCheckProgress? {
+        guard let expertiseCheckRef = record[Field.expertiseCheckRef] as? CKRecord.Reference else {
+            return nil
+        }
+        guard let domain = domainMap[expertiseCheckRef.recordID.recordName] else {
+            return nil
+        }
+
+        let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+        let objectiveId: UUID? = objectiveRef.flatMap { reference in
+            self.objectiveID(forRecordName: reference.recordID.recordName)
+        }
+        var objectiveCode = record[Field.objectiveCode] as? String ?? ""
+        if objectiveCode.isEmpty, let objectiveId, let mappedObjective = objectiveByID(objectiveId) {
+            objectiveCode = mappedObjective.code
+        }
+        guard objectiveCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            return nil
+        }
+
+        let value = (record[Field.value] as? Int)
+            ?? (record[Field.value] as? NSNumber)?.intValue
+            ?? (record[Field.completionPercentage] as? Int)
+            ?? (record[Field.completionPercentage] as? NSNumber)?.intValue
+            ?? 0
+        let updatedAt = (record[Field.updatedAt] as? Date)
+            ?? (record[Field.lastUpdated] as? Date)
+            ?? Date()
+        let statusRaw = record[Field.status] as? String
+        let status = statusRaw.flatMap { ProgressStatus(rawValue: $0) }
+            ?? ObjectiveProgress.calculateStatus(from: value)
+        let editedByDisplayName = record[Field.lastEditedByDisplayName] as? String
+
+        let entry = ExpertiseCheckProgress(
+            domainId: domain.id,
+            objectiveId: objectiveId,
+            objectiveCode: objectiveCode,
+            value: value,
+            updatedAt: updatedAt,
+            editedByDisplayName: editedByDisplayName
+        )
+        entry.status = status
+        entry.updatedAt = updatedAt
+
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: expertiseCheckProgressRecordNameByID)
+        entry.id = uuid
+        expertiseCheckProgressRecordNameByID[uuid] = record.recordID.recordName
+
+        return entry
+    }
+
     private func mapCustomProperty(from record: CKRecord, student: Student) -> StudentCustomProperty {
         let key = record[Field.key] as? String ?? ""
         let value = record[Field.value] as? String ?? ""
@@ -1959,6 +2274,7 @@ final class CloudKitStore: ObservableObject {
         }
         learningObjectives = allLearningObjectives.filter { $0.isArchived == false }
         rebuildObjectiveCaches()
+        rebuildCriteriaProgressCaches()
         if hasLoaded {
             rebuildProgressCaches(debounce: true)
         } else {
@@ -2052,6 +2368,38 @@ final class CloudKitStore: ObservableObject {
         ?? (record[Field.student] as? CKRecord.Reference)
     }
 
+    private func normalizedOverallProgressMode(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized.isEmpty == false else { return nil }
+        guard normalized == OverallProgressMode.computed.rawValue || normalized == OverallProgressMode.manual.rawValue else {
+            return nil
+        }
+        return normalized
+    }
+
+    private func normalizedExpertiseCheckProgressMode(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalized.isEmpty == false else { return nil }
+        guard normalized == ExpertiseCheckProgressMode.computed.rawValue
+                || normalized == ExpertiseCheckProgressMode.criteria.rawValue else {
+            return nil
+        }
+        return normalized
+    }
+
+    private func clampedOverallManualProgress(_ value: Int?) -> Int? {
+        guard let value else { return nil }
+        return min(100, max(0, value))
+    }
+
+    private func forceOverallSelectionIfNeeded(forExpertiseCheckID expertiseCheckID: UUID) {
+        guard case .domain(let selectedDomainID) = selectedScope else { return }
+        guard selectedDomainID == expertiseCheckID else { return }
+        selectedStudentId = nil
+    }
+
     func rootCategoryObjectives() -> [LearningObjective] {
         rootCategoryObjectivesCache
     }
@@ -2074,6 +2422,16 @@ final class CloudKitStore: ObservableObject {
         return progressValuesByStudentObjectiveCode[student.id]?[objective.code] ?? 0
     }
 
+    func criteriaProgressValue(domain: Domain, objective: LearningObjective) -> Int {
+        if let aggregate = criteriaAggregateByDomainID[domain.id]?[objective.id] {
+            return aggregate
+        }
+        if let value = criteriaValuesByDomainObjectiveID[domain.id]?[objective.id] {
+            return value
+        }
+        return criteriaValuesByDomainObjectiveCode[domain.id]?[objective.code] ?? 0
+    }
+
     func objectivePercentage(student: Student, objective: LearningObjective) -> Int {
         if let cached = objectiveAggregateByStudentID[student.id]?[objective.id] {
             return cached
@@ -2082,7 +2440,7 @@ final class CloudKitStore: ObservableObject {
         return objectivePercentage(studentID: student.id, objective: objective, memo: &memo)
     }
 
-    func studentOverallProgress(student: Student) -> Int {
+    func computedOverallProgress(for student: Student) -> Int {
         if let cached = studentOverallProgressByID[student.id] {
             return cached
         }
@@ -2092,6 +2450,65 @@ final class CloudKitStore: ObservableObject {
             partial + objectivePercentage(studentID: student.id, objective: category, memo: &memo)
         }
         return total / rootCategoryObjectivesCache.count
+    }
+
+    func progressMode(for domain: Domain) -> ExpertiseCheckProgressMode {
+        domain.resolvedProgressMode
+    }
+
+    func isCriteriaModeActive(for domain: Domain) -> Bool {
+        progressMode(for: domain) == .criteria
+    }
+
+    func expertiseCheckComputedOverallProgress(for domain: Domain) -> Int {
+        let scopedStudents = students.filter { $0.domain?.id == domain.id }
+        return cohortOverallProgress(students: scopedStudents)
+    }
+
+    func expertiseCheckObjectivePercentage(domain: Domain, objective: LearningObjective) -> Int {
+        if let cached = criteriaAggregateByDomainID[domain.id]?[objective.id] {
+            return cached
+        }
+        var memo: [UUID: Int] = [:]
+        return criteriaObjectivePercentage(domainID: domain.id, objective: objective, memo: &memo)
+    }
+
+    func expertiseCheckCriteriaOverallProgress(for domain: Domain) -> Int {
+        if let cached = criteriaOverallProgressByDomainID[domain.id] {
+            return cached
+        }
+        guard rootCategoryObjectivesCache.isEmpty == false else { return 0 }
+        var memo: [UUID: Int] = [:]
+        let total = rootCategoryObjectivesCache.reduce(0) { partial, category in
+            partial + criteriaObjectivePercentage(domainID: domain.id, objective: category, memo: &memo)
+        }
+        return total / rootCategoryObjectivesCache.count
+    }
+
+    func expertiseCheckOverallProgress(for domain: Domain) -> Int {
+        if isCriteriaModeActive(for: domain) {
+            return expertiseCheckCriteriaOverallProgress(for: domain)
+        }
+        return expertiseCheckComputedOverallProgress(for: domain)
+    }
+
+    func manualOverallProgress(for student: Student) -> Int? {
+        clampedOverallManualProgress(student.overallManualProgress)
+    }
+
+    func isManualOverallActive(for student: Student) -> Bool {
+        guard normalizedOverallProgressMode(student.overallProgressMode) == OverallProgressMode.manual.rawValue else {
+            return false
+        }
+        return manualOverallProgress(for: student) != nil
+    }
+
+    func effectiveOverallProgress(for student: Student) -> Int {
+        return computedOverallProgress(for: student)
+    }
+
+    func studentOverallProgress(student: Student) -> Int {
+        computedOverallProgress(for: student)
     }
 
     func cohortObjectiveAverage(objective: LearningObjective, students: [Student]) -> Int {
@@ -2465,6 +2882,9 @@ final class CloudKitStore: ObservableObject {
             id: domain.id,
             name: domain.name,
             colorHex: domain.colorHex,
+            progressMode: normalizedExpertiseCheckProgressMode(domain.progressMode),
+            criteriaProgressUpdatedAt: domain.criteriaProgressUpdatedAt,
+            criteriaProgressEditedByDisplayName: domain.criteriaProgressEditedByDisplayName,
             recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
         )
     }
@@ -2495,6 +2915,10 @@ final class CloudKitStore: ObservableObject {
             sessionRawValue: student.session.rawValue,
             groupID: student.group?.id,
             domainID: student.domain?.id,
+            overallProgressMode: normalizedOverallProgressMode(student.overallProgressMode),
+            overallManualProgress: clampedOverallManualProgress(student.overallManualProgress),
+            overallManualProgressUpdatedAt: student.overallManualProgressUpdatedAt,
+            overallManualProgressEditedByDisplayName: student.overallManualProgressEditedByDisplayName,
             recordName: studentRecordNameByID[student.id] ?? student.id.uuidString
         )
     }
@@ -2777,6 +3201,9 @@ final class CloudKitStore: ObservableObject {
             }
             domain.name = snapshot.name
             domain.colorHex = snapshot.colorHex
+            domain.progressMode = normalizedExpertiseCheckProgressMode(snapshot.progressMode)
+            domain.criteriaProgressUpdatedAt = snapshot.criteriaProgressUpdatedAt
+            domain.criteriaProgressEditedByDisplayName = snapshot.criteriaProgressEditedByDisplayName
             domains.sort { $0.name < $1.name }
             domainRecordNameByID[snapshot.id] = snapshot.recordName
 
@@ -2892,6 +3319,10 @@ final class CloudKitStore: ObservableObject {
             student.domain = snapshot.domainID.flatMap { domainID in
                 domains.first(where: { $0.id == domainID })
             }
+            student.overallProgressMode = normalizedOverallProgressMode(snapshot.overallProgressMode)
+            student.overallManualProgress = clampedOverallManualProgress(snapshot.overallManualProgress)
+            student.overallManualProgressUpdatedAt = snapshot.overallManualProgressUpdatedAt
+            student.overallManualProgressEditedByDisplayName = snapshot.overallManualProgressEditedByDisplayName
             studentRecordNameByID[snapshot.id] = snapshot.recordName
 
             do {
@@ -3211,6 +3642,13 @@ final class CloudKitStore: ObservableObject {
         rebuildProgressCaches()
     }
 
+    private func clearLocalExpertiseCheckProgressState() {
+        objectWillChange.send()
+        expertiseCheckProgressRecords.removeAll()
+        expertiseCheckProgressRecordNameByID.removeAll()
+        rebuildCriteriaProgressCaches()
+    }
+
     private func clearLocalCustomPropertyState() {
         customPropertyRecordNameByID.removeAll()
         customPropertiesLoadedStudentIDs.removeAll()
@@ -3260,6 +3698,7 @@ final class CloudKitStore: ObservableObject {
         domainRecordNameByID.removeAll()
         pendingDomainCreateIDs.removeAll()
         unconfirmedDomainRecordNames.removeAll()
+        clearLocalExpertiseCheckProgressState()
         for student in students {
             student.domain = nil
         }
@@ -3304,6 +3743,7 @@ final class CloudKitStore: ObservableObject {
         membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
         customPropertyRecordNameByID.removeAll()
+        expertiseCheckProgressRecordNameByID.removeAll()
         pendingGroupCreateIDs.removeAll()
         pendingDomainCreateIDs.removeAll()
         pendingLearningObjectiveCreateIDs.removeAll()
@@ -3331,6 +3771,22 @@ final class CloudKitStore: ObservableObject {
         return Array(byKey.values)
     }
 
+    private func deduplicatedExpertiseCheckProgress(_ records: [ExpertiseCheckProgress]) -> [ExpertiseCheckProgress] {
+        var byKey: [String: ExpertiseCheckProgress] = [:]
+        for progress in records {
+            let objectiveKey = progress.objectiveId?.uuidString ?? "code:\(progress.objectiveCode)"
+            let key = "\(progress.domainId.uuidString)|\(objectiveKey)"
+            if let existing = byKey[key] {
+                if progress.updatedAt >= existing.updatedAt {
+                    byKey[key] = progress
+                }
+            } else {
+                byKey[key] = progress
+            }
+        }
+        return Array(byKey.values)
+    }
+
     private func restoreSnapshotIfAvailable() -> Bool {
         guard isPreviewData == false else { return false }
         guard let snapshot = CloudKitStoreSnapshotCache.load(cohortId: cohortId) else { return false }
@@ -3349,7 +3805,13 @@ final class CloudKitStore: ObservableObject {
 
         var restoredDomains: [Domain] = []
         for cached in snapshot.domains {
-            let domain = Domain(name: cached.name, colorHex: cached.colorHex)
+            let domain = Domain(
+                name: cached.name,
+                colorHex: cached.colorHex,
+                progressMode: normalizedExpertiseCheckProgressMode(cached.progressMode),
+                criteriaProgressUpdatedAt: cached.criteriaProgressUpdatedAt,
+                criteriaProgressEditedByDisplayName: cached.criteriaProgressEditedByDisplayName
+            )
             domain.id = cached.id
             domainRecordNameByID[cached.id] = cached.recordName
             restoredDomains.append(domain)
@@ -3385,6 +3847,10 @@ final class CloudKitStore: ObservableObject {
             )
             student.id = cached.id
             student.createdAt = cached.createdAt
+            student.overallProgressMode = normalizedOverallProgressMode(cached.overallProgressMode)
+            student.overallManualProgress = clampedOverallManualProgress(cached.overallManualProgress)
+            student.overallManualProgressUpdatedAt = cached.overallManualProgressUpdatedAt
+            student.overallManualProgressEditedByDisplayName = cached.overallManualProgressEditedByDisplayName
             studentRecordNameByID[cached.id] = cached.recordName
             restoredStudents.append(student)
         }
@@ -3429,6 +3895,24 @@ final class CloudKitStore: ObservableObject {
             student.progressRecords = deduplicatedProgress(student.progressRecords).sorted { $0.objectiveCode < $1.objectiveCode }
         }
 
+        var restoredExpertiseCheckProgress: [ExpertiseCheckProgress] = []
+        for cached in snapshot.expertiseCheckProgress ?? [] {
+            let progress = ExpertiseCheckProgress(
+                domainId: cached.domainID,
+                objectiveId: cached.objectiveId,
+                objectiveCode: cached.objectiveCode,
+                value: cached.value,
+                updatedAt: cached.updatedAt,
+                editedByDisplayName: cached.editedByDisplayName
+            )
+            progress.id = cached.id
+            progress.status = ProgressStatus(rawValue: cached.statusRawValue)
+                ?? ObjectiveProgress.calculateStatus(from: cached.value)
+            expertiseCheckProgressRecordNameByID[cached.id] = cached.recordName
+            restoredExpertiseCheckProgress.append(progress)
+        }
+        expertiseCheckProgressRecords = deduplicatedExpertiseCheckProgress(restoredExpertiseCheckProgress)
+
         let restoredLabels = snapshot.categoryLabels.map { cached in
             CategoryLabel(code: cached.code, title: cached.title)
         }.sorted { $0.key < $1.key }
@@ -3469,6 +3953,9 @@ final class CloudKitStore: ObservableObject {
                 id: domain.id,
                 name: domain.name,
                 colorHex: domain.colorHex,
+                progressMode: normalizedExpertiseCheckProgressMode(domain.progressMode),
+                criteriaProgressUpdatedAt: domain.criteriaProgressUpdatedAt,
+                criteriaProgressEditedByDisplayName: domain.criteriaProgressEditedByDisplayName,
                 recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
             )
         }
@@ -3501,6 +3988,10 @@ final class CloudKitStore: ObservableObject {
                 sessionRawValue: student.session.rawValue,
                 groupID: student.group?.id,
                 domainID: student.domain?.id,
+                overallProgressMode: normalizedOverallProgressMode(student.overallProgressMode),
+                overallManualProgress: clampedOverallManualProgress(student.overallManualProgress),
+                overallManualProgressUpdatedAt: student.overallManualProgressUpdatedAt,
+                overallManualProgressEditedByDisplayName: student.overallManualProgressEditedByDisplayName,
                 recordName: studentRecordNameByID[student.id] ?? student.id.uuidString
             )
         }
@@ -3530,6 +4021,19 @@ final class CloudKitStore: ObservableObject {
                 )
             }
         }
+        let snapshotExpertiseCheckProgress = expertiseCheckProgressRecords.map { progress in
+            CloudKitStoreSnapshot.ExpertiseCheckProgress(
+                id: progress.id,
+                domainID: progress.domainId,
+                objectiveId: progress.objectiveId,
+                objectiveCode: progress.objectiveCode,
+                value: progress.value,
+                statusRawValue: progress.status.rawValue,
+                updatedAt: progress.updatedAt,
+                editedByDisplayName: progress.editedByDisplayName,
+                recordName: expertiseCheckProgressRecordNameByID[progress.id] ?? progress.id.uuidString
+            )
+        }
 
         return CloudKitStoreSnapshot(
             schemaVersion: CloudKitStoreSnapshot.currentSchemaVersion,
@@ -3542,7 +4046,8 @@ final class CloudKitStore: ObservableObject {
             learningObjectives: snapshotObjectives,
             students: snapshotStudents,
             memberships: snapshotMemberships,
-            objectiveProgress: snapshotProgress
+            objectiveProgress: snapshotProgress,
+            expertiseCheckProgress: snapshotExpertiseCheckProgress
         )
     }
 
@@ -3568,6 +4073,7 @@ final class CloudKitStore: ObservableObject {
     private func rebuildAllDerivedCaches() {
         rebuildGroupMembershipCaches()
         rebuildObjectiveCaches()
+        rebuildCriteriaProgressCaches()
         rebuildProgressCaches()
     }
 
@@ -3799,6 +4305,80 @@ final class CloudKitStore: ObservableObject {
         return value
     }
 
+    private func rebuildCriteriaProgressCaches() {
+        var byDomainObjectiveID: [UUID: [UUID: Int]] = [:]
+        var byDomainObjectiveCode: [UUID: [String: Int]] = [:]
+
+        for record in expertiseCheckProgressRecords {
+            var objectiveIDValues = byDomainObjectiveID[record.domainId] ?? [:]
+            var objectiveCodeValues = byDomainObjectiveCode[record.domainId] ?? [:]
+            if let objectiveId = record.objectiveId {
+                objectiveIDValues[objectiveId] = record.value
+            }
+            objectiveCodeValues[record.objectiveCode] = record.value
+            byDomainObjectiveID[record.domainId] = objectiveIDValues
+            byDomainObjectiveCode[record.domainId] = objectiveCodeValues
+        }
+
+        criteriaValuesByDomainObjectiveID = byDomainObjectiveID
+        criteriaValuesByDomainObjectiveCode = byDomainObjectiveCode
+
+        var aggregateByDomainID: [UUID: [UUID: Int]] = [:]
+        var overallByDomainID: [UUID: Int] = [:]
+
+        for domain in domains {
+            var memo: [UUID: Int] = [:]
+            for objective in learningObjectives {
+                _ = criteriaObjectivePercentage(domainID: domain.id, objective: objective, memo: &memo)
+            }
+            aggregateByDomainID[domain.id] = memo
+
+            let overall: Int
+            if rootCategoryObjectivesCache.isEmpty {
+                overall = 0
+            } else {
+                let total = rootCategoryObjectivesCache.reduce(0) { partial, root in
+                    partial + (memo[root.id] ?? 0)
+                }
+                overall = total / rootCategoryObjectivesCache.count
+            }
+            overallByDomainID[domain.id] = overall
+        }
+
+        criteriaAggregateByDomainID = aggregateByDomainID
+        criteriaOverallProgressByDomainID = overallByDomainID
+    }
+
+    private func criteriaObjectivePercentage(
+        domainID: UUID,
+        objective: LearningObjective,
+        memo: inout [UUID: Int]
+    ) -> Int {
+        if let cached = memo[objective.id] {
+            return cached
+        }
+
+        let children = objectiveChildrenByParentID[objective.id] ?? []
+        if children.isEmpty {
+            let value: Int
+            if let objectiveValue = criteriaValuesByDomainObjectiveID[domainID]?[objective.id] {
+                value = objectiveValue
+            } else {
+                value = criteriaValuesByDomainObjectiveCode[domainID]?[objective.code] ?? 0
+            }
+            memo[objective.id] = value
+            return value
+        }
+
+        var total = 0
+        for child in children {
+            total += criteriaObjectivePercentage(domainID: domainID, objective: child, memo: &memo)
+        }
+        let value = total / children.count
+        memo[objective.id] = value
+        return value
+    }
+
     private func recordProtectionKey(recordType: String, recordName: String) -> String {
         "\(recordType)|\(recordName)"
     }
@@ -3858,14 +4438,22 @@ final class CloudKitStore: ObservableObject {
         let fetchedByID = Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0) })
         for existing in domains {
             guard let incoming = fetchedByID[existing.id] else { continue }
+            let previousMode = existing.resolvedProgressMode
             existing.name = incoming.name
             existing.colorHex = incoming.colorHex
+            existing.progressMode = normalizedExpertiseCheckProgressMode(incoming.progressMode)
+            existing.criteriaProgressUpdatedAt = incoming.criteriaProgressUpdatedAt
+            existing.criteriaProgressEditedByDisplayName = incoming.criteriaProgressEditedByDisplayName
+            if previousMode != existing.resolvedProgressMode {
+                forceOverallSelectionIfNeeded(forExpertiseCheckID: existing.id)
+            }
         }
         for incoming in fetched where domains.contains(where: { $0.id == incoming.id }) == false {
             domains.append(incoming)
         }
         domains.removeAll { fetchedByID[$0.id] == nil }
         domains.sort { $0.name < $1.name }
+        rebuildCriteriaProgressCaches()
     }
 
     private func mergeFetchedCategoryLabels(_ fetched: [CategoryLabel]) {
@@ -3938,6 +4526,7 @@ final class CloudKitStore: ObservableObject {
             let membershipPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
             let progressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
             let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let expertiseCheckProgressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
 
             async let groupsChanged = service.queryRecords(
                 ofType: RecordType.cohortGroup,
@@ -3971,13 +4560,27 @@ final class CloudKitStore: ObservableObject {
                 ofType: RecordType.studentCustomProperty,
                 predicate: customPropPredicate
             )
+            async let expertiseCheckProgressChanged = service.queryRecords(
+                ofType: RecordType.expertiseCheckProgress,
+                predicate: expertiseCheckProgressPredicate
+            )
 
-            let (groupRecords, domainRecords, labelRecords, objectiveRecords, studentRecords, membershipRecords, progressRecords, customPropRecords) =
-            try await (groupsChanged, domainsChanged, labelsChanged, objectivesChanged, studentsChanged, membershipsChanged, progressChanged, customPropsChanged)
+            let (groupRecords, domainRecords, labelRecords, objectiveRecords, studentRecords, membershipRecords, progressRecords, customPropRecords, expertiseCheckProgressRecords) =
+            try await (
+                groupsChanged,
+                domainsChanged,
+                labelsChanged,
+                objectivesChanged,
+                studentsChanged,
+                membershipsChanged,
+                progressChanged,
+                customPropsChanged,
+                expertiseCheckProgressChanged
+            )
 
             let totalChanges = groupRecords.count + domainRecords.count + labelRecords.count +
                               objectiveRecords.count + studentRecords.count + membershipRecords.count +
-                              progressRecords.count + customPropRecords.count
+                              progressRecords.count + customPropRecords.count + expertiseCheckProgressRecords.count
             
             if totalChanges == 0 {
                 syncLogger.info("Incremental sync: no changes found since last sync")
@@ -3987,7 +4590,7 @@ final class CloudKitStore: ObservableObject {
                 return
             }
             
-            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public)")
+            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public) expertiseCheckProgress=\(expertiseCheckProgressRecords.count, privacy: .public)")
 
             // Upsert order matters: groups/domains first, then students, then child records.
             isApplyingRemoteChanges = true
@@ -4023,6 +4626,10 @@ final class CloudKitStore: ObservableObject {
             if customPropRecords.isEmpty == false {
                 syncLogger.info("Applying \(customPropRecords.count, privacy: .public) custom property changes")
                 applyCustomPropertyChanges(customPropRecords)
+            }
+            if expertiseCheckProgressRecords.isEmpty == false {
+                syncLogger.info("Applying \(expertiseCheckProgressRecords.count, privacy: .public) expertise check progress changes")
+                applyExpertiseCheckProgressChanges(expertiseCheckProgressRecords)
             }
 
             // Advance cursor
@@ -4073,6 +4680,8 @@ final class CloudKitStore: ObservableObject {
             deleteProgressByRecordID(recordID)
         case RecordType.studentCustomProperty:
             deleteCustomPropertyByRecordID(recordID)
+        case RecordType.expertiseCheckProgress:
+            deleteExpertiseCheckProgressByRecordID(recordID)
         default:
             break
         }
@@ -4101,11 +4710,30 @@ final class CloudKitStore: ObservableObject {
             async let studentRecords = service.queryRecords(ofType: RecordType.student, predicate: predicate)
             async let membershipRecords = service.queryRecords(ofType: RecordType.studentGroupMembership, predicate: predicate)
             async let labelRecords = service.queryRecords(ofType: RecordType.categoryLabel, predicate: predicate)
+            async let expertiseCheckProgressRecords = service.queryRecords(
+                ofType: RecordType.expertiseCheckProgress,
+                predicate: predicate
+            )
 
-            let (remoteGroups, remoteDomains, remoteObjectives, remoteStudents, remoteMemberships, remoteLabels) =
-            try await (groupRecords, domainRecords, objectiveRecords, studentRecords, membershipRecords, labelRecords)
+            let (
+                remoteGroups,
+                remoteDomains,
+                remoteObjectives,
+                remoteStudents,
+                remoteMemberships,
+                remoteLabels,
+                remoteExpertiseCheckProgress
+            ) = try await (
+                groupRecords,
+                domainRecords,
+                objectiveRecords,
+                studentRecords,
+                membershipRecords,
+                labelRecords,
+                expertiseCheckProgressRecords
+            )
 
-            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
+            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public) expertiseCheckProgress=\(remoteExpertiseCheckProgress.count, privacy: .public)")
 
             // Apply ALL remote records - handles adds AND updates
             isApplyingRemoteChanges = true
@@ -4127,6 +4755,9 @@ final class CloudKitStore: ObservableObject {
             }
             if remoteMemberships.isEmpty == false {
                 applyMembershipChanges(remoteMemberships)
+            }
+            if remoteExpertiseCheckProgress.isEmpty == false {
+                applyExpertiseCheckProgressChanges(remoteExpertiseCheckProgress)
             }
 
             // Remove locally-held records that no longer exist on server (deletions)
@@ -4174,6 +4805,13 @@ final class CloudKitStore: ObservableObject {
                 guard isRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key) == false else { continue }
                 guard unconfirmedCategoryLabelRecordNames.contains(key) == false else { continue }
                 deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
+            }
+
+            let remoteExpertiseCheckProgressIDs = Set(remoteExpertiseCheckProgress.map { $0.recordID.recordName })
+            let localExpertiseCheckProgressIDs = Set(expertiseCheckProgressRecordNameByID.values)
+            for recordName in localExpertiseCheckProgressIDs.subtracting(remoteExpertiseCheckProgressIDs) {
+                guard isRecentlyWritten(recordType: RecordType.expertiseCheckProgress, recordName: recordName) == false else { continue }
+                deleteExpertiseCheckProgressByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             // Progress and custom properties are only reconciled for loaded students
@@ -4287,6 +4925,8 @@ final class CloudKitStore: ObservableObject {
             applyProgressChanges([record])
         case RecordType.studentCustomProperty:
             applyCustomPropertyChanges([record])
+        case RecordType.expertiseCheckProgress:
+            applyExpertiseCheckProgressChanges([record])
         default:
             break
         }
@@ -4333,15 +4973,31 @@ final class CloudKitStore: ObservableObject {
         for record in records {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
+            let mode = normalizedExpertiseCheckProgressMode(record[Field.progressMode] as? String)
+            let criteriaUpdatedAt = record[Field.criteriaProgressUpdatedAt] as? Date
+            let criteriaEditedBy = record[Field.criteriaProgressEditedByDisplayName] as? String
             let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
 
             if let existing = domains.first(where: { $0.id == uuid }) {
                 syncLogger.info("Updating existing domain: \(name, privacy: .public)")
+                let previousMode = existing.resolvedProgressMode
                 existing.name = name
                 existing.colorHex = colorHex
+                existing.progressMode = mode
+                existing.criteriaProgressUpdatedAt = criteriaUpdatedAt
+                existing.criteriaProgressEditedByDisplayName = criteriaEditedBy
+                if previousMode != existing.resolvedProgressMode {
+                    forceOverallSelectionIfNeeded(forExpertiseCheckID: uuid)
+                }
             } else {
                 syncLogger.info("Adding new domain: \(name, privacy: .public)")
-                let d = Domain(name: name, colorHex: colorHex)
+                let d = Domain(
+                    name: name,
+                    colorHex: colorHex,
+                    progressMode: mode,
+                    criteriaProgressUpdatedAt: criteriaUpdatedAt,
+                    criteriaProgressEditedByDisplayName: criteriaEditedBy
+                )
                 d.id = uuid
                 domains.append(d)
             }
@@ -4352,6 +5008,7 @@ final class CloudKitStore: ObservableObject {
         }
 
         domains.sort { $0.name < $1.name }
+        rebuildCriteriaProgressCaches()
     }
 
     private func applyCategoryLabelChanges(_ records: [CKRecord]) {
@@ -4455,6 +5112,7 @@ final class CloudKitStore: ObservableObject {
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
+        var requiresProgressCacheRebuild = false
 
         for record in records {
             let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: studentRecordNameByID)
@@ -4462,6 +5120,13 @@ final class CloudKitStore: ObservableObject {
             let name = record[Field.name] as? String ?? "Unnamed"
             let sessionRaw = record[Field.session] as? String ?? Session.morning.rawValue
             let session = Session(rawValue: sessionRaw) ?? .morning
+            let mode = normalizedOverallProgressMode(record[Field.overallProgressMode] as? String)
+            let manualProgress = clampedOverallManualProgress(
+                (record[Field.overallManualProgress] as? Int)
+                ?? (record[Field.overallManualProgress] as? NSNumber)?.intValue
+            )
+            let manualUpdatedAt = record[Field.overallManualProgressUpdatedAt] as? Date
+            let manualEditedBy = record[Field.overallManualProgressEditedByDisplayName] as? String
 
             let group = (record[Field.group] as? CKRecord.Reference).flatMap { groupByRecordName[$0.recordID.recordName] }
             let domain = (record[Field.domain] as? CKRecord.Reference).flatMap { domainByRecordName[$0.recordID.recordName] }
@@ -4475,12 +5140,21 @@ final class CloudKitStore: ObservableObject {
                 existing.group = group
                 existing.domain = domain
                 existing.createdAt = createdAt
+                existing.overallProgressMode = mode
+                existing.overallManualProgress = manualProgress
+                existing.overallManualProgressUpdatedAt = manualUpdatedAt
+                existing.overallManualProgressEditedByDisplayName = manualEditedBy
             } else {
                 syncLogger.info("Adding new student: \(name, privacy: .public) (id: \(uuid.uuidString.prefix(8), privacy: .public))")
                 let s = Student(name: name, group: group, session: session, domain: domain)
                 s.id = uuid
                 s.createdAt = createdAt
+                s.overallProgressMode = mode
+                s.overallManualProgress = manualProgress
+                s.overallManualProgressUpdatedAt = manualUpdatedAt
+                s.overallManualProgressEditedByDisplayName = manualEditedBy
                 students.append(s)
+                requiresProgressCacheRebuild = true
             }
 
             studentRecordNameByID[uuid] = record.recordID.recordName
@@ -4491,7 +5165,9 @@ final class CloudKitStore: ObservableObject {
         students.sort { $0.createdAt < $1.createdAt }
         refreshLegacyGroupConvenience()
         rebuildGroupMembershipCaches()
-        rebuildProgressCaches(debounce: true)
+        if requiresProgressCacheRebuild {
+            rebuildProgressCaches(debounce: true)
+        }
         syncLogger.info("Students array now has \(self.students.count, privacy: .public) students")
     }
 
@@ -4643,6 +5319,38 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func applyExpertiseCheckProgressChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+        objectWillChange.send()
+
+        let domainMap = dictionaryByRecordName(items: domains, recordNameLookup: domainRecordNameByID)
+        for record in records {
+            guard let mapped = mapExpertiseCheckProgress(from: record, domainMap: domainMap) else {
+                continue
+            }
+
+            if let existing = expertiseCheckProgressRecords.first(where: { $0.id == mapped.id }) {
+                existing.domainId = mapped.domainId
+                existing.objectiveId = mapped.objectiveId
+                existing.objectiveCode = mapped.objectiveCode
+                existing.value = mapped.value
+                existing.status = mapped.status
+                existing.updatedAt = mapped.updatedAt
+                existing.editedByDisplayName = mapped.editedByDisplayName
+            } else {
+                expertiseCheckProgressRecords.append(mapped)
+            }
+
+            expertiseCheckProgressRecordNameByID[mapped.id] = record.recordID.recordName
+            unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckProgress, recordName: record.recordID.recordName)
+        }
+
+        expertiseCheckProgressRecords = deduplicatedExpertiseCheckProgress(expertiseCheckProgressRecords)
+        let remainingIDs = Set(expertiseCheckProgressRecords.map(\.id))
+        expertiseCheckProgressRecordNameByID = expertiseCheckProgressRecordNameByID.filter { remainingIDs.contains($0.key) }
+        rebuildCriteriaProgressCaches()
+    }
+
     private func deleteGroupByRecordID(_ recordID: CKRecord.ID) {
         let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: groupRecordNameByID)
         syncLogger.info("Deleting group with id: \(uuid.uuidString.prefix(8), privacy: .public)")
@@ -4668,10 +5376,14 @@ final class CloudKitStore: ObservableObject {
         unmarkRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
         pendingDomainCreateIDs.remove(uuid)
         unconfirmedDomainRecordNames.remove(recordID.recordName)
+        expertiseCheckProgressRecords.removeAll { $0.domainId == uuid }
+        let remainingExpertiseProgressIDs = Set(expertiseCheckProgressRecords.map(\.id))
+        expertiseCheckProgressRecordNameByID = expertiseCheckProgressRecordNameByID.filter { remainingExpertiseProgressIDs.contains($0.key) }
 
         for student in students where student.domain?.id == uuid {
             student.domain = nil
         }
+        rebuildCriteriaProgressCaches()
     }
 
     private func deleteStudentByRecordID(_ recordID: CKRecord.ID) {
@@ -4705,11 +5417,21 @@ final class CloudKitStore: ObservableObject {
         guard let objectiveID else { return }
         syncLogger.info("Deleting learning objective id: \(objectiveID.uuidString.prefix(8), privacy: .public)")
         objectWillChange.send()
+        let deletedObjectiveCode = allLearningObjectives.first(where: { $0.id == objectiveID })?.code
         allLearningObjectives.removeAll { $0.id == objectiveID }
         learningObjectiveRecordNameByID.removeValue(forKey: objectiveID)
         unmarkRecordRecentlyWritten(recordType: RecordType.learningObjective, recordName: recordID.recordName)
         pendingLearningObjectiveCreateIDs.remove(objectiveID)
         unconfirmedLearningObjectiveRecordNames.remove(recordID.recordName)
+        expertiseCheckProgressRecords.removeAll { progress in
+            if progress.objectiveId == objectiveID {
+                return true
+            }
+            if let deletedObjectiveCode {
+                return progress.objectiveCode == deletedObjectiveCode
+            }
+            return false
+        }
         setLearningObjectives(allLearningObjectives)
     }
 
@@ -4762,6 +5484,16 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func deleteExpertiseCheckProgressByRecordID(_ recordID: CKRecord.ID) {
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: expertiseCheckProgressRecordNameByID)
+        syncLogger.info("Deleting expertise check progress with id: \(uuid.uuidString.prefix(8), privacy: .public)")
+        objectWillChange.send()
+        expertiseCheckProgressRecords.removeAll { $0.id == uuid }
+        expertiseCheckProgressRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckProgress, recordName: recordID.recordName)
+        rebuildCriteriaProgressCaches()
+    }
+
     // Old reconcile functions removed - now handled by reconcileWithServer()
 
     private enum RecordType {
@@ -4774,6 +5506,7 @@ final class CloudKitStore: ObservableObject {
         static let studentGroupMembership = "StudentGroupMembership"
         static let studentCustomProperty = "StudentCustomProperty"
         static let objectiveProgress = "ObjectiveProgress"
+        static let expertiseCheckProgress = "ExpertiseCheckProgress"
     }
 
     private enum Field {
@@ -4787,9 +5520,13 @@ final class CloudKitStore: ObservableObject {
         static let group = "group"
         static let groupRef = "groupRef"
         static let domain = "domain"
+        static let progressMode = "progressMode"
+        static let criteriaProgressUpdatedAt = "criteriaProgressUpdatedAt"
+        static let criteriaProgressEditedByDisplayName = "criteriaProgressEditedByDisplayName"
         static let session = "session"
         static let student = "student"
         static let studentRef = "studentRef"
+        static let expertiseCheckRef = "expertiseCheckRef"
         static let objectiveRef = "objectiveRef"
         static let objectiveCode = "objectiveCode"
         static let completionPercentage = "completionPercentage"
@@ -4806,6 +5543,10 @@ final class CloudKitStore: ObservableObject {
         static let createdAt = "createdAt"
         static let updatedAt = "updatedAt"
         static let lastEditedByDisplayName = "lastEditedByDisplayName"
+        static let overallProgressMode = "overallProgressMode"
+        static let overallManualProgress = "overallManualProgress"
+        static let overallManualProgressUpdatedAt = "overallManualProgressUpdatedAt"
+        static let overallManualProgressEditedByDisplayName = "overallManualProgressEditedByDisplayName"
     }
 }
 

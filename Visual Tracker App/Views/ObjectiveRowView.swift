@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ObjectiveRowView: View {
     let objective: LearningObjective
-    let student: Student
+    let context: ObjectiveProgressEditingContext
     let allObjectives: [LearningObjective]
     let indentLevel: Int
 
@@ -20,14 +20,24 @@ struct ObjectiveRowView: View {
     }
 
     private var leafPercentage: Int {
-        store.progressValue(student: student, objective: objective)
+        switch context {
+        case .student(let student):
+            return store.progressValue(student: student, objective: objective)
+        case .expertiseCheck(let domain):
+            return store.criteriaProgressValue(domain: domain, objective: objective)
+        }
     }
 
     private var completionPercentage: Int {
-        if hasChildren {
-            return store.objectivePercentage(student: student, objective: objective)
+        if hasChildren == false {
+            return leafPercentage
         }
-        return leafPercentage
+        switch context {
+        case .student(let student):
+            return store.objectivePercentage(student: student, objective: objective)
+        case .expertiseCheck(let domain):
+            return store.expertiseCheckObjectivePercentage(domain: domain, objective: objective)
+        }
     }
 
     private var status: ProgressStatus {
@@ -172,7 +182,12 @@ struct ObjectiveRowView: View {
 
     private func updateProgress(_ newPercentage: Int) {
         Task {
-            await store.setProgress(student: student, objective: objective, value: newPercentage)
+            switch context {
+            case .student(let student):
+                await store.setProgress(student: student, objective: objective, value: newPercentage)
+            case .expertiseCheck(let domain):
+                await store.setExpertiseCheckCriteriaProgress(domain: domain, objective: objective, value: newPercentage)
+            }
         }
     }
 }

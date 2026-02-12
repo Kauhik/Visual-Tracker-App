@@ -7,7 +7,6 @@ struct ManageDomainsSheet: View {
 
     private var domains: [Domain] { store.domains }
     private var students: [Student] { store.students }
-    private var allObjectives: [LearningObjective] { store.learningObjectives }
 
     @State private var newDomainName: String = ""
     @State private var newDomainColor: DomainColorPreset = .none
@@ -128,8 +127,18 @@ struct ManageDomainsSheet: View {
 
     private func domainRow(_ domain: Domain) -> some View {
         let count = students.filter { $0.domain?.id == domain.id }.count
-        let average = domainAverage(domain: domain)
+        let computedAverage = store.expertiseCheckComputedOverallProgress(for: domain)
+        let criteriaAverage = store.expertiseCheckCriteriaOverallProgress(for: domain)
+        let activeAverage = store.expertiseCheckOverallProgress(for: domain)
         let badgeColor = Color(hex: domain.colorHex) ?? Color.secondary.opacity(0.35)
+        let modeBinding = Binding<ExpertiseCheckProgressMode>(
+            get: { domain.resolvedProgressMode },
+            set: { mode in
+                Task {
+                    await store.setExpertiseCheckProgressMode(domain, mode: mode)
+                }
+            }
+        )
 
         return HStack(spacing: zoomManager.scaled(12)) {
             Circle()
@@ -147,6 +156,14 @@ struct ManageDomainsSheet: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
+                Picker("Overall Mode", selection: modeBinding) {
+                    Text("Computed").tag(ExpertiseCheckProgressMode.computed)
+                    Text("By Criteria").tag(ExpertiseCheckProgressMode.criteria)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: zoomManager.scaled(210))
+
                 if store.isPendingCreate(domain: domain) {
                     HStack(spacing: zoomManager.scaled(4)) {
                         ProgressView()
@@ -161,11 +178,11 @@ struct ManageDomainsSheet: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: zoomManager.scaled(2)) {
-                Text("\(average)%")
+                Text("\(activeAverage)%")
                     .font(.system(.callout, design: .rounded))
                     .fontWeight(.semibold)
 
-                Text("Expertise Check average")
+                Text("Computed \(computedAverage)% • Criteria \(criteriaAverage)%")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
@@ -208,11 +225,6 @@ struct ManageDomainsSheet: View {
         }
     }
 
-    private func domainAverage(domain: Domain) -> Int {
-        let domainStudents = students.filter { $0.domain?.id == domain.id }
-        guard domainStudents.isEmpty == false else { return 0 }
-        return ProgressCalculator.cohortOverall(students: domainStudents, allObjectives: allObjectives)
-    }
 }
 
 private enum DomainColorPreset: CaseIterable, Hashable {
