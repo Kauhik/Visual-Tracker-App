@@ -28,6 +28,9 @@ struct StudentDetailView: View {
     private var categoryLabels: [CategoryLabel] { store.categoryLabels }
 
     private var displayMode: DisplayMode {
+        if let selectedExpertiseCheck, selectedExpertiseCheck.overallMode == .expertReview {
+            return .overview
+        }
         if let selectedStudent {
             return .student(selectedStudent)
         }
@@ -36,6 +39,20 @@ struct StudentDetailView: View {
 
     private var selectedScope: StudentFilterScope {
         store.selectedScope
+    }
+
+    private var selectedExpertiseCheck: Domain? {
+        guard case .domain(let id) = selectedScope else { return nil }
+        return domains.first(where: { $0.id == id })
+    }
+
+    private var isExpertiseCheckDetailScope: Bool {
+        selectedExpertiseCheck != nil
+    }
+
+    private var canSelectStudentCards: Bool {
+        guard let selectedExpertiseCheck else { return true }
+        return selectedExpertiseCheck.overallMode == .computed
     }
 
     private var rootCategories: [LearningObjective] {
@@ -143,9 +160,27 @@ struct StudentDetailView: View {
                 return store.groupOverallProgress(group: group, students: students)
             }
             return store.cohortOverallProgress(students: filteredStudents)
-        case .domain, .noDomain:
+        case .domain(let id):
+            guard let domain = domains.first(where: { $0.id == id }) else {
+                return store.cohortOverallProgress(students: filteredStudents)
+            }
+            if domain.overallMode == .expertReview {
+                return store.expertiseCheckReviewerOverallProgress(domain: domain)
+            }
+            return store.cohortOverallProgress(students: filteredStudents)
+        case .noDomain:
             return store.cohortOverallProgress(students: filteredStudents)
         }
+    }
+
+    private var expertiseCheckComputedOverall: Int {
+        guard isExpertiseCheckDetailScope else { return 0 }
+        return store.cohortOverallProgress(students: filteredStudents)
+    }
+
+    private var expertiseCheckReviewOverall: Int {
+        guard let selectedExpertiseCheck else { return 0 }
+        return store.expertiseCheckReviewerOverallProgress(domain: selectedExpertiseCheck)
     }
 
     private var headerTitle: String {
@@ -184,6 +219,14 @@ struct StudentDetailView: View {
         }
     }
 
+    private var showingExpertiseCheckOverall: Bool {
+        guard isExpertiseCheckDetailScope else { return false }
+        if case .overview = displayMode {
+            return true
+        }
+        return false
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: zoomManager.scaled(18)) {
@@ -203,18 +246,46 @@ struct StudentDetailView: View {
 
                 studentBoardSection
 
-                if let student = selectedStudent, eligibleStudentCount > 0 {
+                if let selectedExpertiseCheck, selectedExpertiseCheck.overallMode == .expertReview {
+                    expertiseCheckLegendView
+                        .padding(.top, zoomManager.scaled(2))
+
+                    Divider()
+                        .opacity(0.25)
+
+                    ForEach(rootCategories, id: \.id) { category in
+                        ExpertiseCheckCategorySectionView(
+                            categoryObjective: category,
+                            expertiseCheck: selectedExpertiseCheck,
+                            students: filteredStudents
+                        )
+                    }
+                } else if let student = selectedStudent, eligibleStudentCount > 0 {
                     legendView
                         .padding(.top, zoomManager.scaled(2))
 
                     Divider()
                         .opacity(0.25)
 
-                    ForEach(rootCategories) { category in
+                    ForEach(rootCategories, id: \.id) { category in
                         CategorySectionView(
                             categoryObjective: category,
                             student: student,
                             allObjectives: allObjectives
+                        )
+                    }
+                } else if let selectedExpertiseCheck {
+                    expertiseCheckLegendView
+                        .padding(.top, zoomManager.scaled(2))
+
+                    Divider()
+                        .opacity(0.25)
+
+                    ForEach(rootCategories, id: \.id) { category in
+                        ExpertiseCheckCategorySectionView(
+                            categoryObjective: category,
+                            expertiseCheck: selectedExpertiseCheck,
+                            students: filteredStudents
                         )
                     }
                 } else {
@@ -311,6 +382,11 @@ struct StudentDetailView: View {
                 }
             }
         }
+        .onChange(of: selectedScope) { _, newScope in
+            guard let selectedStudent else { return }
+            guard isStudent(selectedStudent, in: newScope) == false else { return }
+            self.selectedStudent = nil
+        }
     }
 
     private var unifiedOverviewContainer: some View {
@@ -389,7 +465,7 @@ struct StudentDetailView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: zoomManager.scaled(4)) {
-                Text("Overall Progress")
+                Text(showingExpertiseCheckOverall ? "Expertise Check Overall" : "Overall Progress")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -400,6 +476,10 @@ struct StudentDetailView: View {
 
                     CircularProgressView(progress: Double(headerOverallProgress) / 100.0)
                         .frame(width: zoomManager.scaled(50), height: zoomManager.scaled(50))
+                }
+
+                if let selectedExpertiseCheck {
+                    expertiseCheckOverallComparison(for: selectedExpertiseCheck)
                 }
             }
         }
@@ -422,8 +502,12 @@ struct StudentDetailView: View {
                     .layoutPriority(1)
             }
 
+            if let selectedExpertiseCheck {
+                expertiseCheckModePicker(for: selectedExpertiseCheck)
+            }
+
             VStack(spacing: zoomManager.scaled(10)) {
-                ForEach(rootCategories) { category in
+                ForEach(rootCategories, id: \.id) { category in
                     overviewCategoryRow(category)
                 }
             }
@@ -437,7 +521,11 @@ struct StudentDetailView: View {
         case .student(let student):
             value = store.objectivePercentage(student: student, objective: category)
         case .overview:
-            value = store.cohortObjectiveAverage(objective: category, students: breakdownStudents)
+            if let selectedExpertiseCheck, selectedExpertiseCheck.overallMode == .expertReview {
+                value = store.expertiseCheckReviewerObjectivePercentage(domain: selectedExpertiseCheck, objective: category)
+            } else {
+                value = store.cohortObjectiveAverage(objective: category, students: breakdownStudents)
+            }
         }
 
         return HStack(spacing: zoomManager.scaled(12)) {
@@ -560,6 +648,99 @@ struct StudentDetailView: View {
         .padding(.horizontal, zoomManager.scaled(8))
     }
 
+    private var expertiseCheckLegendView: some View {
+        HStack(spacing: zoomManager.scaled(18)) {
+            Text("Legend:")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: zoomManager.scaled(6)) {
+                Text("✅")
+                Text("Complete (100%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: zoomManager.scaled(6)) {
+                Text("☑️")
+                Text("In Progress (1-99%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: zoomManager.scaled(6)) {
+                Text("⬜")
+                Text("Not Started (0%)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if let selectedExpertiseCheck, selectedExpertiseCheck.overallMode == .expertReview {
+                Text("Expert Review mode: edit milestone progress directly")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("Computed mode: read-only averages from students in this expertise check")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, zoomManager.scaled(8))
+    }
+
+    private func expertiseCheckModePicker(for domain: Domain) -> some View {
+        HStack(spacing: zoomManager.scaled(10)) {
+            Text("Overall Source")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            Picker("Overall Source", selection: Binding(
+                get: { domain.overallMode },
+                set: { newMode in
+                    Task {
+                        await store.setExpertiseCheckMode(domain, mode: newMode)
+                    }
+                }
+            )) {
+                Text("Computed").tag(ExpertiseCheckOverallMode.computed)
+                Text("Expert Review").tag(ExpertiseCheckOverallMode.expertReview)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: zoomManager.scaled(320))
+            .disabled(store.isSavingExpertiseCheckMode(domain: domain))
+
+            if store.isSavingExpertiseCheckMode(domain: domain) {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Spacer()
+        }
+    }
+
+    private func expertiseCheckOverallComparison(for domain: Domain) -> some View {
+        let computed = expertiseCheckComputedOverall
+        let review = expertiseCheckReviewOverall
+        return VStack(alignment: .trailing, spacing: zoomManager.scaled(2)) {
+            HStack(spacing: zoomManager.scaled(4)) {
+                Text(domain.overallMode == .computed ? "●" : "○")
+                    .foregroundColor(.accentColor)
+                Text("Computed \(computed)%")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            HStack(spacing: zoomManager.scaled(4)) {
+                Text(domain.overallMode == .expertReview ? "●" : "○")
+                    .foregroundColor(.accentColor)
+                Text("Expert Review \(review)%")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
     private var studentBoardSection: some View {
         VStack(alignment: .leading, spacing: zoomManager.scaled(10)) {
             HStack(spacing: zoomManager.scaled(10)) {
@@ -586,9 +767,10 @@ struct StudentDetailView: View {
                             StudentCardView(
                                 student: boardStudent,
                                 overallProgress: overall,
-                                isSelected: selectedStudent?.id == boardStudent.id,
+                                isSelected: canSelectStudentCards && selectedStudent?.id == boardStudent.id,
                                 groups: groups,
                                 onSelect: {
+                                    guard canSelectStudentCards else { return }
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         selectedStudent = boardStudent
                                     }
@@ -677,7 +859,7 @@ struct StudentDetailView: View {
                 Button {
                     beginScopeSwitch(to: .overall)
                 } label: {
-                    Label("All Expertise Check...", systemImage: "graduationcap")
+                    Label("All Expertise Checks...", systemImage: "graduationcap")
                 }
 
                 Divider()
@@ -857,10 +1039,19 @@ struct StudentDetailView: View {
     }
 
     private func beginScopeSwitch(to newFilter: StudentFilterScope, group: CohortGroup? = nil) {
+        let shouldKeepSelection: Bool
+        if let selectedStudent {
+            shouldKeepSelection = isStudent(selectedStudent, in: newFilter)
+        } else {
+            shouldKeepSelection = false
+        }
+
         withAnimation(.easeInOut(duration: 0.15)) {
             store.selectedScope = newFilter
             selectedGroup = group
-            selectedStudent = nil
+            if shouldKeepSelection == false {
+                selectedStudent = nil
+            }
         }
     }
 
@@ -904,6 +1095,21 @@ struct StudentDetailView: View {
     private func setGroups(for student: Student, groups: [CohortGroup]) {
         Task {
             await store.setGroups(for: student, groups: groups, updateLegacyGroupField: true)
+        }
+    }
+
+    private func isStudent(_ student: Student, in scope: StudentFilterScope) -> Bool {
+        switch scope {
+        case .overall:
+            return true
+        case .ungrouped:
+            return store.isUngrouped(student: student)
+        case .group(let id):
+            return store.groups(for: student).contains(where: { $0.id == id })
+        case .domain(let id):
+            return student.domain?.id == id
+        case .noDomain:
+            return student.domain == nil
         }
     }
 

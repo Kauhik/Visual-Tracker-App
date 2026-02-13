@@ -1,7 +1,7 @@
 import Foundation
 
 struct CloudKitStoreSnapshot: Codable {
-    static let currentSchemaVersion: Int = 1
+    static let currentSchemaVersion: Int = 2
 
     struct Group: Codable {
         let id: UUID
@@ -14,6 +14,7 @@ struct CloudKitStoreSnapshot: Codable {
         let id: UUID
         let name: String
         let colorHex: String?
+        let overallModeRaw: String
         let recordName: String
     }
 
@@ -67,6 +68,19 @@ struct CloudKitStoreSnapshot: Codable {
         let recordName: String
     }
 
+    struct ExpertiseCheckObjectiveScore: Codable {
+        let id: UUID
+        let expertiseCheckID: UUID
+        let objectiveId: UUID?
+        let objectiveCode: String
+        let value: Int
+        let statusRawValue: String
+        let createdAt: Date
+        let updatedAt: Date
+        let lastEditedByDisplayName: String?
+        let recordName: String
+    }
+
     let schemaVersion: Int
     let savedAt: Date
     let cohortRecordName: String?
@@ -78,6 +92,7 @@ struct CloudKitStoreSnapshot: Codable {
     let students: [Student]
     let memberships: [Membership]
     let objectiveProgress: [ObjectiveProgress]
+    let expertiseCheckObjectiveScores: [ExpertiseCheckObjectiveScore]
 }
 
 enum CloudKitStoreSnapshotCache {

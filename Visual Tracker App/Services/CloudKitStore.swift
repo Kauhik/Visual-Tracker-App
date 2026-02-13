@@ -24,6 +24,7 @@ extension CloudKitStoreSnapshot.Domain: Equatable {
         lhs.id == rhs.id
             && lhs.name == rhs.name
             && lhs.colorHex == rhs.colorHex
+            && lhs.overallModeRaw == rhs.overallModeRaw
             && lhs.recordName == rhs.recordName
     }
 }
@@ -76,6 +77,24 @@ extension CloudKitStoreSnapshot.ObjectiveProgress: Equatable {
             && lhs.notes == rhs.notes
             && lhs.lastUpdated == rhs.lastUpdated
             && lhs.statusRawValue == rhs.statusRawValue
+            && lhs.recordName == rhs.recordName
+    }
+}
+
+extension CloudKitStoreSnapshot.ExpertiseCheckObjectiveScore: Equatable {
+    static func == (
+        lhs: CloudKitStoreSnapshot.ExpertiseCheckObjectiveScore,
+        rhs: CloudKitStoreSnapshot.ExpertiseCheckObjectiveScore
+    ) -> Bool {
+        lhs.id == rhs.id
+            && lhs.expertiseCheckID == rhs.expertiseCheckID
+            && lhs.objectiveId == rhs.objectiveId
+            && lhs.objectiveCode == rhs.objectiveCode
+            && lhs.value == rhs.value
+            && lhs.statusRawValue == rhs.statusRawValue
+            && lhs.createdAt == rhs.createdAt
+            && lhs.updatedAt == rhs.updatedAt
+            && lhs.lastEditedByDisplayName == rhs.lastEditedByDisplayName
             && lhs.recordName == rhs.recordName
     }
 }
@@ -156,9 +175,12 @@ final class CloudKitStore: ObservableObject {
     private var membershipRecordNameByID: [UUID: String] = [:]
     private var progressRecordNameByID: [UUID: String] = [:]
     private var customPropertyRecordNameByID: [UUID: String] = [:]
+    private var expertiseCheckScoreRecordNameByID: [UUID: String] = [:]
     private var allLearningObjectives: [LearningObjective] = []
+    private var expertiseCheckObjectiveScores: [ExpertiseCheckObjectiveScore] = []
     private var pendingGroupCreateIDs: Set<UUID> = []
     private var pendingDomainCreateIDs: Set<UUID> = []
+    private var pendingExpertiseCheckModeUpdateIDs: Set<UUID> = []
     private var pendingLearningObjectiveCreateIDs: Set<UUID> = []
     private var pendingCategoryLabelCreateKeys: Set<String> = []
     private var unconfirmedGroupRecordNames: Set<String> = []
@@ -179,6 +201,8 @@ final class CloudKitStore: ObservableObject {
     private var objectiveAggregateByStudentID: [UUID: [UUID: Int]] = [:]
     private var studentOverallProgressByID: [UUID: Int] = [:]
     private var cohortOverallProgressCache: Int = 0
+    private var expertiseCheckScoreByDomainObjectiveID: [UUID: [UUID: ExpertiseCheckObjectiveScore]] = [:]
+    private var expertiseCheckScoreByDomainObjectiveCode: [UUID: [String: ExpertiseCheckObjectiveScore]] = [:]
     private let maxUndoHistorySize: Int = 50
     private var undoStack: [UndoOperation] = []
     private var redoStack: [UndoOperation] = []
@@ -473,6 +497,10 @@ final class CloudKitStore: ObservableObject {
                 ofType: RecordType.objectiveProgress,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
             )
+            async let expertiseCheckScoreRecords = service.queryRecords(
+                ofType: RecordType.expertiseCheckObjectiveScore,
+                predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
+            )
 
             let (
                 fetchedGroupRecords,
@@ -481,7 +509,8 @@ final class CloudKitStore: ObservableObject {
                 fetchedLearningObjectiveRecords,
                 fetchedMembershipRecords,
                 fetchedStudentRecords,
-                fetchedProgressRecords
+                fetchedProgressRecords,
+                fetchedExpertiseCheckScoreRecords
             ) = try await (
                 groupRecords,
                 domainRecords,
@@ -489,7 +518,8 @@ final class CloudKitStore: ObservableObject {
                 learningObjectiveRecords,
                 membershipRecords,
                 studentRecords,
-                progressRecords
+                progressRecords,
+                expertiseCheckScoreRecords
             )
 
             clearRecordTrackingStateForFullReload()
@@ -498,6 +528,9 @@ final class CloudKitStore: ObservableObject {
             let mappedDomains = fetchedDomainRecords.map { mapDomain(from: $0) }
             let mappedLearningObjectives = mapLearningObjectives(from: fetchedLearningObjectiveRecords)
             let mappedLabels = fetchedLabelRecords.map { mapCategoryLabel(from: $0) }
+            let mappedExpertiseCheckScores = fetchedExpertiseCheckScoreRecords.compactMap {
+                mapExpertiseCheckObjectiveScore(from: $0)
+            }
 
             let groupMap = dictionaryByRecordName(items: mappedGroups, recordNameLookup: groupRecordNameByID)
             let domainMap = dictionaryByRecordName(items: mappedDomains, recordNameLookup: domainRecordNameByID)
@@ -522,6 +555,7 @@ final class CloudKitStore: ObservableObject {
             mergeFetchedCategoryLabels(mappedLabels)
             memberships = uniqueMemberships(mappedMemberships)
             students = mappedStudents.sorted { $0.createdAt < $1.createdAt }
+            applyExpertiseCheckScores(mappedExpertiseCheckScores)
             if mappedLearningObjectives.isEmpty {
                 setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
             } else {
@@ -691,6 +725,7 @@ final class CloudKitStore: ObservableObject {
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.name] = domain.name
         record[Field.colorHex] = domain.colorHex
+        record[Field.overallMode] = domain.overallMode.rawValue
         applyAuditFields(to: record, createdAt: Date())
 
         do {
@@ -767,10 +802,12 @@ final class CloudKitStore: ObservableObject {
         domains.removeAll { $0.id == domain.id }
 
         do {
+            try await deleteExpertiseCheckScores(for: domain)
             try await service.delete(recordID: recordID)
             for student in affected {
                 try await saveStudentRecord(student)
             }
+            syncCoordinator?.noteLocalWrite()
             recordUndoOperation(
                 label: "Delete Expertise Check",
                 undo: { store in await store.restoreDeletedDomain(undoBundle) },
@@ -1461,7 +1498,7 @@ final class CloudKitStore: ObservableObject {
         guard await requireWriteAccess() else { return }
         clearUndoHistory()
         isLoading = true
-        resetProgress = ResetProgress(message: "Resetting data to base template...", step: 0, totalSteps: 10)
+        resetProgress = ResetProgress(message: "Resetting data to base template...", step: 0, totalSteps: 11)
         defer {
             isLoading = false
             resetProgress = nil
@@ -1470,43 +1507,46 @@ final class CloudKitStore: ObservableObject {
         do {
             let cohortRecordID = try await ensureCohortRecordIDForWrite()
 
-            resetProgress = ResetProgress(message: "Deleting objective progress...", step: 1, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting objective progress...", step: 1, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
             clearLocalObjectiveProgressState()
 
-            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
             clearLocalCustomPropertyState()
 
-            resetProgress = ResetProgress(message: "Deleting memberships...", step: 3, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting memberships...", step: 3, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.studentGroupMembership, cohortRecordID: cohortRecordID)
             clearLocalMembershipState()
 
-            resetProgress = ResetProgress(message: "Deleting students...", step: 4, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting students...", step: 4, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: cohortRecordID)
             clearLocalStudentState()
 
-            resetProgress = ResetProgress(message: "Deleting groups...", step: 5, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 5, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: cohortRecordID)
             clearLocalGroupState()
 
-            resetProgress = ResetProgress(message: "Deleting category labels...", step: 6, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 6, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: cohortRecordID)
             clearLocalCategoryLabelState()
 
-            resetProgress = ResetProgress(message: "Resetting Expertise Check to base defaults...", step: 7, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting Expertise Check review scores...", step: 7, totalSteps: 11)
+            try await deleteAllRecords(ofType: RecordType.expertiseCheckObjectiveScore, cohortRecordID: cohortRecordID)
+
+            resetProgress = ResetProgress(message: "Resetting Expertise Check to base defaults...", step: 8, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
             clearLocalDomainState()
 
-            resetProgress = ResetProgress(message: "Deleting Success Criteria and Milestones...", step: 8, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Deleting Success Criteria and Milestones...", step: 9, totalSteps: 11)
             try await deleteAllRecords(ofType: RecordType.learningObjective, cohortRecordID: cohortRecordID)
             clearLocalLearningObjectiveState()
 
-            resetProgress = ResetProgress(message: "Restoring default Success Criteria and Milestones...", step: 9, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Restoring default Success Criteria and Milestones...", step: 10, totalSteps: 11)
             let defaults = defaultLearningObjectivesWithResolvedParents()
             try await seedLearningObjectives(defaults)
 
-            resetProgress = ResetProgress(message: "Restoring base Expertise Check defaults...", step: 10, totalSteps: 10)
+            resetProgress = ResetProgress(message: "Restoring base Expertise Check defaults...", step: 11, totalSteps: 11)
             await ensurePresetDomains()
 
             setLearningObjectives(defaults)
@@ -1521,7 +1561,7 @@ final class CloudKitStore: ObservableObject {
         guard await requireWriteAccess() else { return }
         clearUndoHistory()
         isLoading = true
-        resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 7)
+        resetProgress = ResetProgress(message: "Resetting...", step: 0, totalSteps: 8)
         defer {
             isLoading = false
             resetProgress = nil
@@ -1530,22 +1570,24 @@ final class CloudKitStore: ObservableObject {
         do {
             let cohortRecordID = try await ensureCohortRecordIDForWrite()
 
-            resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting progress...", step: 1, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting students...", step: 3, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting category labels...", step: 4, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 4, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting memberships...", step: 5, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting memberships...", step: 5, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.studentGroupMembership, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting groups...", step: 6, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 6, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: cohortRecordID)
-            resetProgress = ResetProgress(message: "Deleting domains...", step: 7, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Deleting review scores...", step: 7, totalSteps: 8)
+            try await deleteAllRecords(ofType: RecordType.expertiseCheckObjectiveScore, cohortRecordID: cohortRecordID)
+            resetProgress = ResetProgress(message: "Deleting domains...", step: 8, totalSteps: 8)
             try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: cohortRecordID)
 
-            resetProgress = ResetProgress(message: "Reloading data...", step: 7, totalSteps: 7)
+            resetProgress = ResetProgress(message: "Reloading data...", step: 8, totalSteps: 8)
             await reloadAllData()
             await ensurePresetDomains()
             syncCoordinator?.noteLocalWrite()
@@ -1600,6 +1642,7 @@ final class CloudKitStore: ObservableObject {
         record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         record[Field.name] = domain.name
         record[Field.colorHex] = domain.colorHex
+        record[Field.overallMode] = domain.overallMode.rawValue
         applyAuditFields(to: record, createdAt: Date())
         let saved = try await service.save(record: record)
         domainRecordNameByID[domain.id] = saved.recordID.recordName
@@ -1748,6 +1791,23 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func deleteExpertiseCheckScores(for domain: Domain) async throws {
+        guard let cohortRecordID else { return }
+        let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+        let domainRecordID = recordID(for: domain, lookup: domainRecordNameByID)
+        let domainRef = CKRecord.Reference(recordID: domainRecordID, action: .none)
+        let predicate = NSPredicate(format: "cohortRef == %@ AND expertiseCheckRef == %@", cohortRef, domainRef)
+        let records = try await service.queryRecords(ofType: RecordType.expertiseCheckObjectiveScore, predicate: predicate)
+        for record in records {
+            try await service.delete(recordID: record.recordID)
+            if let existingID = existingID(forRecordName: record.recordID.recordName, lookup: expertiseCheckScoreRecordNameByID) {
+                expertiseCheckScoreRecordNameByID.removeValue(forKey: existingID)
+            }
+        }
+        expertiseCheckObjectiveScores.removeAll { $0.expertiseCheckId == domain.id }
+        rebuildExpertiseCheckScoreCaches()
+    }
+
     private func deleteAllRecords(ofType recordType: String, cohortRecordID: CKRecord.ID) async throws {
         let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
         let predicate = NSPredicate(format: "cohortRef == %@", cohortRef)
@@ -1769,7 +1829,9 @@ final class CloudKitStore: ObservableObject {
     private func mapDomain(from record: CKRecord) -> Domain {
         let name = record[Field.name] as? String ?? "Untitled"
         let colorHex = record[Field.colorHex] as? String
-        let domain = Domain(name: name, colorHex: colorHex)
+        let overallModeRaw = (record[Field.overallMode] as? String) ?? ExpertiseCheckOverallMode.computed.rawValue
+        let overallMode = ExpertiseCheckOverallMode(rawValue: overallModeRaw) ?? .computed
+        let domain = Domain(name: name, colorHex: colorHex, overallMode: overallMode)
         let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
         domain.id = uuid
         domainRecordNameByID[uuid] = record.recordID.recordName
@@ -1942,6 +2004,146 @@ final class CloudKitStore: ObservableObject {
         customPropertyRecordNameByID[uuid] = record.recordID.recordName
 
         return property
+    }
+
+    private func mapExpertiseCheckObjectiveScore(from record: CKRecord) -> ExpertiseCheckObjectiveScore? {
+        guard let domainRef = record[Field.expertiseCheckRef] as? CKRecord.Reference else { return nil }
+        let domainID = resolvedStableID(forRecordName: domainRef.recordID.recordName, lookup: domainRecordNameByID)
+        let objectiveRef = record[Field.objectiveRef] as? CKRecord.Reference
+        var objectiveId = objectiveRef.flatMap { objectiveID(forRecordName: $0.recordID.recordName) }
+        var objectiveCode = (record[Field.objectiveCode] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if objectiveCode.isEmpty, let objectiveId, let objective = objectiveByID(objectiveId) {
+            objectiveCode = objective.code
+        }
+        if objectiveId == nil, objectiveCode.isEmpty == false {
+            objectiveId = objectiveByCode(objectiveCode)?.id
+        }
+        guard objectiveId != nil || objectiveCode.isEmpty == false else { return nil }
+
+        let canonicalValue = (record[Field.value] as? Int)
+            ?? (record[Field.value] as? NSNumber)?.intValue
+            ?? 0
+        let clampedValue = max(0, min(100, canonicalValue))
+        let statusRaw = (record[Field.status] as? String) ?? ObjectiveProgress.calculateStatus(from: clampedValue).rawValue
+        let createdAt = (record[Field.createdAt] as? Date) ?? Date()
+        let updatedAt = (record[Field.updatedAt] as? Date) ?? createdAt
+        let displayName = record[Field.lastEditedByDisplayName] as? String
+
+        let score = ExpertiseCheckObjectiveScore(
+            expertiseCheckId: domainID,
+            objectiveId: objectiveId,
+            objectiveCode: objectiveCode,
+            value: clampedValue,
+            status: ProgressStatus(rawValue: statusRaw),
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            lastEditedByDisplayName: displayName
+        )
+        let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: expertiseCheckScoreRecordNameByID)
+        score.id = uuid
+        expertiseCheckScoreRecordNameByID[uuid] = record.recordID.recordName
+        return score
+    }
+
+    private func applyExpertiseCheckScores(_ incoming: [ExpertiseCheckObjectiveScore], cleanupRemoteDuplicates: Bool = true) {
+        guard incoming.isEmpty == false else {
+            expertiseCheckObjectiveScores.removeAll()
+            rebuildExpertiseCheckScoreCaches()
+            return
+        }
+
+        var bestByKey: [String: ExpertiseCheckObjectiveScore] = [:]
+        var staleRecordNames: [String] = []
+
+        for score in incoming {
+            guard let domainID = score.expertiseCheckId else { continue }
+            let key = expertiseCheckScoreKey(
+                domainID: domainID,
+                objectiveID: score.objectiveId,
+                objectiveCode: score.objectiveCode
+            )
+            if let existing = bestByKey[key] {
+                if shouldPreferExpertiseCheckScore(score, over: existing) {
+                    staleRecordNames.append(recordName(for: existing))
+                    bestByKey[key] = score
+                } else {
+                    staleRecordNames.append(recordName(for: score))
+                }
+            } else {
+                bestByKey[key] = score
+            }
+        }
+
+        expertiseCheckObjectiveScores = Array(bestByKey.values)
+        rebuildExpertiseCheckScoreCaches()
+
+        if cleanupRemoteDuplicates && staleRecordNames.isEmpty == false {
+            cleanupDuplicateExpertiseCheckScoreRecords(recordNames: staleRecordNames)
+        }
+    }
+
+    private func rebuildExpertiseCheckScoreCaches() {
+        var byDomainObjectiveID: [UUID: [UUID: ExpertiseCheckObjectiveScore]] = [:]
+        var byDomainObjectiveCode: [UUID: [String: ExpertiseCheckObjectiveScore]] = [:]
+
+        for score in expertiseCheckObjectiveScores {
+            guard let domainID = score.expertiseCheckId else { continue }
+            if let objectiveID = score.objectiveId {
+                byDomainObjectiveID[domainID, default: [:]][objectiveID] = score
+            }
+            let codeKey = normalizedObjectiveCodeKey(score.objectiveCode)
+            if codeKey.isEmpty == false {
+                byDomainObjectiveCode[domainID, default: [:]][codeKey] = score
+            }
+        }
+
+        expertiseCheckScoreByDomainObjectiveID = byDomainObjectiveID
+        expertiseCheckScoreByDomainObjectiveCode = byDomainObjectiveCode
+
+        if hasLoaded {
+            scheduleSnapshotPersistence()
+        }
+    }
+
+    private func expertiseCheckScoreKey(domainID: UUID, objectiveID: UUID?, objectiveCode: String) -> String {
+        if let objectiveID {
+            return "\(domainID.uuidString)|\(objectiveID.uuidString)"
+        }
+        return "\(domainID.uuidString)|code:\(normalizedObjectiveCodeKey(objectiveCode))"
+    }
+
+    private func shouldPreferExpertiseCheckScore(
+        _ candidate: ExpertiseCheckObjectiveScore,
+        over existing: ExpertiseCheckObjectiveScore
+    ) -> Bool {
+        if candidate.updatedAt != existing.updatedAt {
+            return candidate.updatedAt > existing.updatedAt
+        }
+        if candidate.createdAt != existing.createdAt {
+            return candidate.createdAt > existing.createdAt
+        }
+        return candidate.id.uuidString < existing.id.uuidString
+    }
+
+    private func recordName(for score: ExpertiseCheckObjectiveScore) -> String {
+        expertiseCheckScoreRecordNameByID[score.id] ?? score.id.uuidString
+    }
+
+    private func cleanupDuplicateExpertiseCheckScoreRecords(recordNames: [String]) {
+        guard recordNames.isEmpty == false else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            guard await self.requireWriteAccess() else { return }
+            for recordName in Set(recordNames) {
+                let recordID = CKRecord.ID(recordName: recordName)
+                do {
+                    try await self.service.delete(recordID: recordID)
+                    self.unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: recordName)
+                } catch {
+                    self.syncLogger.error("Failed duplicate ExpertiseCheckObjectiveScore cleanup for \(recordName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
     }
 
     private func setLearningObjectives(_ objectives: [LearningObjective]) {
@@ -2136,6 +2338,226 @@ final class CloudKitStore: ObservableObject {
             return student.group?.id == group.id
         }
         return cohortOverallProgress(students: groupStudents)
+    }
+
+    func expertiseCheckReviewLeafValue(domain: Domain, objective: LearningObjective) -> Int {
+        if let score = expertiseCheckScoreByDomainObjectiveID[domain.id]?[objective.id] {
+            return score.value
+        }
+        return expertiseCheckScoreByDomainObjectiveCode[domain.id]?[normalizedObjectiveCodeKey(objective.code)]?.value ?? 0
+    }
+
+    func expertiseCheckReviewerObjectivePercentage(domain: Domain, objective: LearningObjective) -> Int {
+        var memo: [UUID: Int] = [:]
+        return expertiseCheckReviewerObjectivePercentage(
+            domainID: domain.id,
+            objective: objective,
+            memo: &memo
+        )
+    }
+
+    func expertiseCheckReviewerOverallProgress(domain: Domain) -> Int {
+        guard rootCategoryObjectivesCache.isEmpty == false else { return 0 }
+        var memo: [UUID: Int] = [:]
+        let total = rootCategoryObjectivesCache.reduce(0) { partial, objective in
+            partial + expertiseCheckReviewerObjectivePercentage(
+                domainID: domain.id,
+                objective: objective,
+                memo: &memo
+            )
+        }
+        return total / rootCategoryObjectivesCache.count
+    }
+
+    func setExpertiseCheckMode(_ domain: Domain, mode: ExpertiseCheckOverallMode) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        guard domain.overallMode != mode else { return }
+        guard pendingExpertiseCheckModeUpdateIDs.contains(domain.id) == false else { return }
+
+        let previousMode = domain.overallMode
+        objectWillChange.send()
+        pendingExpertiseCheckModeUpdateIDs.insert(domain.id)
+        defer {
+            objectWillChange.send()
+            pendingExpertiseCheckModeUpdateIDs.remove(domain.id)
+        }
+
+        objectWillChange.send()
+        domain.overallMode = mode
+        if hasLoaded {
+            scheduleSnapshotPersistence()
+        }
+
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            do {
+                try await saveDomainRecord(domain)
+                return
+            } catch {
+                let isConflict = isCloudKitOplockConflict(error)
+                if isConflict, attempt < maxAttempts {
+                    let delay = retryDelayNanoseconds(for: error, attempt: attempt)
+                    syncLogger.warning(
+                        "Retrying expertise check mode save for \(domain.id.uuidString, privacy: .public) after lock conflict (attempt \(attempt, privacy: .public)/\(maxAttempts, privacy: .public))"
+                    )
+                    try? await Task.sleep(nanoseconds: delay)
+                    continue
+                }
+
+                objectWillChange.send()
+                domain.overallMode = previousMode
+                if hasLoaded {
+                    scheduleSnapshotPersistence()
+                }
+                lastErrorMessage = "Failed to update expertise check mode: \(service.describe(error))"
+                return
+            }
+        }
+    }
+
+    func setExpertiseCheckReviewScore(domain: Domain, objective: LearningObjective, value: Int) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+        guard let cohortRecordID else { return }
+
+        let canonicalValue = max(0, min(100, value))
+        if canonicalValue == 0 {
+            await deleteExpertiseCheckObjectiveScore(domain: domain, objective: objective)
+            return
+        }
+
+        let existingByID = expertiseCheckScoreByDomainObjectiveID[domain.id]?[objective.id]
+        let existingByCode = expertiseCheckScoreByDomainObjectiveCode[domain.id]?[normalizedObjectiveCodeKey(objective.code)]
+        let existing = existingByID ?? existingByCode
+        let previousSnapshot = existing.map { ($0.value, $0.statusRawValue, $0.updatedAt, $0.objectiveId, $0.objectiveCode) }
+
+        let score: ExpertiseCheckObjectiveScore
+        let created: Bool
+        if let existing {
+            score = existing
+            created = false
+        } else {
+            score = ExpertiseCheckObjectiveScore(
+                expertiseCheckId: domain.id,
+                objectiveId: objective.id,
+                objectiveCode: objective.code,
+                value: canonicalValue,
+                status: ObjectiveProgress.calculateStatus(from: canonicalValue),
+                createdAt: Date(),
+                updatedAt: Date(),
+                lastEditedByDisplayName: editorDisplayName()
+            )
+            expertiseCheckObjectiveScores.append(score)
+            created = true
+        }
+
+        objectWillChange.send()
+        score.expertiseCheckId = domain.id
+        score.objectiveId = objective.id
+        score.objectiveCode = objective.code
+        score.value = canonicalValue
+        score.statusRawValue = ObjectiveProgress.calculateStatus(from: canonicalValue).rawValue
+        score.updatedAt = Date()
+        score.lastEditedByDisplayName = editorDisplayName()
+        applyExpertiseCheckScores(expertiseCheckObjectiveScores)
+
+        do {
+            let scoreRecordID = recordID(for: score, lookup: expertiseCheckScoreRecordNameByID)
+            markRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: scoreRecordID.recordName)
+            let record = CKRecord(recordType: RecordType.expertiseCheckObjectiveScore, recordID: scoreRecordID)
+            let domainRecordID = recordID(for: domain, lookup: domainRecordNameByID)
+            let objectiveRecordID = recordID(for: objective, lookup: learningObjectiveRecordNameByID)
+            record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+            record[Field.expertiseCheckRef] = CKRecord.Reference(recordID: domainRecordID, action: .none)
+            record[Field.objectiveRef] = CKRecord.Reference(recordID: objectiveRecordID, action: .none)
+            record[Field.objectiveCode] = objective.code
+            record[Field.value] = canonicalValue
+            record[Field.status] = score.statusRawValue
+            applyAuditFields(to: record, createdAt: score.createdAt)
+
+            let saved = try await service.save(record: record)
+            expertiseCheckScoreRecordNameByID[score.id] = saved.recordID.recordName
+            markRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: saved.recordID.recordName)
+            syncCoordinator?.noteLocalWrite()
+        } catch {
+            if created {
+                expertiseCheckObjectiveScores.removeAll { $0.id == score.id }
+            } else if let previousSnapshot {
+                score.value = previousSnapshot.0
+                score.statusRawValue = previousSnapshot.1
+                score.updatedAt = previousSnapshot.2
+                score.objectiveId = previousSnapshot.3
+                score.objectiveCode = previousSnapshot.4
+            }
+            applyExpertiseCheckScores(expertiseCheckObjectiveScores)
+            lastErrorMessage = "Failed to save expertise check review score: \(error.localizedDescription)"
+        }
+    }
+
+    func deleteExpertiseCheckObjectiveScore(domain: Domain, objective: LearningObjective) async {
+        lastErrorMessage = nil
+        guard await requireWriteAccess() else { return }
+
+        let existing = expertiseCheckScoreByDomainObjectiveID[domain.id]?[objective.id]
+            ?? expertiseCheckScoreByDomainObjectiveCode[domain.id]?[normalizedObjectiveCodeKey(objective.code)]
+        guard let existing else { return }
+
+        let recordName = expertiseCheckScoreRecordNameByID[existing.id] ?? existing.id.uuidString
+        objectWillChange.send()
+        expertiseCheckObjectiveScores.removeAll { $0.id == existing.id }
+        expertiseCheckScoreRecordNameByID.removeValue(forKey: existing.id)
+        applyExpertiseCheckScores(expertiseCheckObjectiveScores)
+
+        do {
+            try await service.delete(recordID: CKRecord.ID(recordName: recordName))
+            unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: recordName)
+            syncCoordinator?.noteLocalWrite()
+        } catch {
+            expertiseCheckObjectiveScores.append(existing)
+            expertiseCheckScoreRecordNameByID[existing.id] = recordName
+            applyExpertiseCheckScores(expertiseCheckObjectiveScores)
+            lastErrorMessage = "Failed to delete expertise check review score: \(error.localizedDescription)"
+        }
+    }
+
+    private func expertiseCheckReviewerObjectivePercentage(
+        domainID: UUID,
+        objective: LearningObjective,
+        memo: inout [UUID: Int]
+    ) -> Int {
+        if let cached = memo[objective.id] {
+            return cached
+        }
+
+        let children = objectiveChildrenByParentID[objective.id] ?? []
+        if children.isEmpty {
+            let value = expertiseCheckReviewLeafValueByDomainID(
+                domainID: domainID,
+                objectiveID: objective.id,
+                objectiveCode: objective.code
+            )
+            memo[objective.id] = value
+            return value
+        }
+
+        let total = children.reduce(0) { partial, child in
+            partial + expertiseCheckReviewerObjectivePercentage(domainID: domainID, objective: child, memo: &memo)
+        }
+        let value = total / max(children.count, 1)
+        memo[objective.id] = value
+        return value
+    }
+
+    private func expertiseCheckReviewLeafValueByDomainID(
+        domainID: UUID,
+        objectiveID: UUID,
+        objectiveCode: String
+    ) -> Int {
+        if let score = expertiseCheckScoreByDomainObjectiveID[domainID]?[objectiveID] {
+            return score.value
+        }
+        return expertiseCheckScoreByDomainObjectiveCode[domainID]?[normalizedObjectiveCodeKey(objectiveCode)]?.value ?? 0
     }
 
     private func uniqueMemberships(_ input: [StudentGroupMembership]) -> [StudentGroupMembership] {
@@ -2465,6 +2887,7 @@ final class CloudKitStore: ObservableObject {
             id: domain.id,
             name: domain.name,
             colorHex: domain.colorHex,
+            overallModeRaw: domain.overallMode.rawValue,
             recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
         )
     }
@@ -2770,13 +3193,15 @@ final class CloudKitStore: ObservableObject {
                 domain = existing
                 created = false
             } else {
-                domain = Domain(name: snapshot.name, colorHex: snapshot.colorHex)
+                let mode = ExpertiseCheckOverallMode(rawValue: snapshot.overallModeRaw) ?? .computed
+                domain = Domain(name: snapshot.name, colorHex: snapshot.colorHex, overallMode: mode)
                 domain.id = snapshot.id
                 domains.append(domain)
                 created = true
             }
             domain.name = snapshot.name
             domain.colorHex = snapshot.colorHex
+            domain.overallMode = ExpertiseCheckOverallMode(rawValue: snapshot.overallModeRaw) ?? .computed
             domains.sort { $0.name < $1.name }
             domainRecordNameByID[snapshot.id] = snapshot.recordName
 
@@ -3148,6 +3573,38 @@ final class CloudKitStore: ObservableObject {
         return ckError.code == .unknownItem
     }
 
+    private func isCloudKitOplockConflict(_ error: Error) -> Bool {
+        guard let ckError = error as? CKError else {
+            return error.localizedDescription.localizedCaseInsensitiveContains("oplock")
+        }
+
+        if ckError.code == .serverRecordChanged {
+            return true
+        }
+
+        if ckError.code == .partialFailure,
+           let partials = ckError.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Error],
+           partials.values.contains(where: { isCloudKitOplockConflict($0) }) {
+            return true
+        }
+
+        let details = service.describe(error).lowercased()
+        if details.contains("oplock") || details.contains("server record changed") {
+            return true
+        }
+
+        return false
+    }
+
+    private func retryDelayNanoseconds(for error: Error, attempt: Int) -> UInt64 {
+        if let ckError = error as? CKError, let retryAfter = ckError.retryAfterSeconds {
+            let clampedSeconds = max(0.2, min(retryAfter, 2.0))
+            return UInt64(clampedSeconds * 1_000_000_000)
+        }
+        let baseSeconds = min(0.2 * Double(attempt), 0.8)
+        return UInt64(baseSeconds * 1_000_000_000)
+    }
+
     func openICloudSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preferences.AppleIDPrefPane") {
             NSWorkspace.shared.open(url)
@@ -3160,6 +3617,10 @@ final class CloudKitStore: ObservableObject {
 
     func isPendingCreate(domain: Domain) -> Bool {
         pendingDomainCreateIDs.contains(domain.id)
+    }
+
+    func isSavingExpertiseCheckMode(domain: Domain) -> Bool {
+        pendingExpertiseCheckModeUpdateIDs.contains(domain.id)
     }
 
     func isPendingCreate(objective: LearningObjective) -> Bool {
@@ -3259,7 +3720,12 @@ final class CloudKitStore: ObservableObject {
         domains.removeAll()
         domainRecordNameByID.removeAll()
         pendingDomainCreateIDs.removeAll()
+        pendingExpertiseCheckModeUpdateIDs.removeAll()
         unconfirmedDomainRecordNames.removeAll()
+        expertiseCheckObjectiveScores.removeAll()
+        expertiseCheckScoreRecordNameByID.removeAll()
+        expertiseCheckScoreByDomainObjectiveID.removeAll()
+        expertiseCheckScoreByDomainObjectiveCode.removeAll()
         for student in students {
             student.domain = nil
         }
@@ -3304,8 +3770,10 @@ final class CloudKitStore: ObservableObject {
         membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
         customPropertyRecordNameByID.removeAll()
+        expertiseCheckScoreRecordNameByID.removeAll()
         pendingGroupCreateIDs.removeAll()
         pendingDomainCreateIDs.removeAll()
+        pendingExpertiseCheckModeUpdateIDs.removeAll()
         pendingLearningObjectiveCreateIDs.removeAll()
         pendingCategoryLabelCreateKeys.removeAll()
         unconfirmedGroupRecordNames.removeAll()
@@ -3314,6 +3782,9 @@ final class CloudKitStore: ObservableObject {
         unconfirmedCategoryLabelRecordNames.removeAll()
         recentLocalWriteRecordKeys.removeAll()
         objectiveRefMigrationRecordNames.removeAll()
+        expertiseCheckObjectiveScores.removeAll()
+        expertiseCheckScoreByDomainObjectiveID.removeAll()
+        expertiseCheckScoreByDomainObjectiveCode.removeAll()
     }
 
     private func deduplicatedProgress(_ records: [ObjectiveProgress]) -> [ObjectiveProgress] {
@@ -3349,7 +3820,8 @@ final class CloudKitStore: ObservableObject {
 
         var restoredDomains: [Domain] = []
         for cached in snapshot.domains {
-            let domain = Domain(name: cached.name, colorHex: cached.colorHex)
+            let mode = ExpertiseCheckOverallMode(rawValue: cached.overallModeRaw) ?? .computed
+            let domain = Domain(name: cached.name, colorHex: cached.colorHex, overallMode: mode)
             domain.id = cached.id
             domainRecordNameByID[cached.id] = cached.recordName
             restoredDomains.append(domain)
@@ -3429,6 +3901,23 @@ final class CloudKitStore: ObservableObject {
             student.progressRecords = deduplicatedProgress(student.progressRecords).sorted { $0.objectiveCode < $1.objectiveCode }
         }
 
+        var restoredExpertiseCheckScores: [ExpertiseCheckObjectiveScore] = []
+        for cached in snapshot.expertiseCheckObjectiveScores {
+            let score = ExpertiseCheckObjectiveScore(
+                expertiseCheckId: cached.expertiseCheckID,
+                objectiveId: cached.objectiveId,
+                objectiveCode: cached.objectiveCode,
+                value: cached.value,
+                status: ProgressStatus(rawValue: cached.statusRawValue),
+                createdAt: cached.createdAt,
+                updatedAt: cached.updatedAt,
+                lastEditedByDisplayName: cached.lastEditedByDisplayName
+            )
+            score.id = cached.id
+            expertiseCheckScoreRecordNameByID[cached.id] = cached.recordName
+            restoredExpertiseCheckScores.append(score)
+        }
+
         let restoredLabels = snapshot.categoryLabels.map { cached in
             CategoryLabel(code: cached.code, title: cached.title)
         }.sorted { $0.key < $1.key }
@@ -3438,6 +3927,7 @@ final class CloudKitStore: ObservableObject {
         students = restoredStudents
         memberships = uniqueMemberships(restoredMemberships)
         categoryLabels = restoredLabels
+        applyExpertiseCheckScores(restoredExpertiseCheckScores, cleanupRemoteDuplicates: false)
         if restoredObjectives.isEmpty {
             setLearningObjectives(defaultLearningObjectivesWithResolvedParents())
         } else {
@@ -3469,6 +3959,7 @@ final class CloudKitStore: ObservableObject {
                 id: domain.id,
                 name: domain.name,
                 colorHex: domain.colorHex,
+                overallModeRaw: domain.overallMode.rawValue,
                 recordName: domainRecordNameByID[domain.id] ?? domain.id.uuidString
             )
         }
@@ -3530,6 +4021,21 @@ final class CloudKitStore: ObservableObject {
                 )
             }
         }
+        let snapshotExpertiseCheckScores = expertiseCheckObjectiveScores.compactMap { score -> CloudKitStoreSnapshot.ExpertiseCheckObjectiveScore? in
+            guard let expertiseCheckID = score.expertiseCheckId else { return nil }
+            return CloudKitStoreSnapshot.ExpertiseCheckObjectiveScore(
+                id: score.id,
+                expertiseCheckID: expertiseCheckID,
+                objectiveId: score.objectiveId,
+                objectiveCode: score.objectiveCode,
+                value: score.value,
+                statusRawValue: score.statusRawValue,
+                createdAt: score.createdAt,
+                updatedAt: score.updatedAt,
+                lastEditedByDisplayName: score.lastEditedByDisplayName,
+                recordName: expertiseCheckScoreRecordNameByID[score.id] ?? score.id.uuidString
+            )
+        }
 
         return CloudKitStoreSnapshot(
             schemaVersion: CloudKitStoreSnapshot.currentSchemaVersion,
@@ -3542,7 +4048,8 @@ final class CloudKitStore: ObservableObject {
             learningObjectives: snapshotObjectives,
             students: snapshotStudents,
             memberships: snapshotMemberships,
-            objectiveProgress: snapshotProgress
+            objectiveProgress: snapshotProgress,
+            expertiseCheckObjectiveScores: snapshotExpertiseCheckScores
         )
     }
 
@@ -3860,6 +4367,7 @@ final class CloudKitStore: ObservableObject {
             guard let incoming = fetchedByID[existing.id] else { continue }
             existing.name = incoming.name
             existing.colorHex = incoming.colorHex
+            existing.overallMode = incoming.overallMode
         }
         for incoming in fetched where domains.contains(where: { $0.id == incoming.id }) == false {
             domains.append(incoming)
@@ -3938,6 +4446,7 @@ final class CloudKitStore: ObservableObject {
             let membershipPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
             let progressPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
             let customPropPredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
+            let expertiseCheckScorePredicate = NSPredicate(format: "cohortRef == %@ AND updatedAt >= %@", cohortRef, updatedAfter)
 
             async let groupsChanged = service.queryRecords(
                 ofType: RecordType.cohortGroup,
@@ -3971,13 +4480,36 @@ final class CloudKitStore: ObservableObject {
                 ofType: RecordType.studentCustomProperty,
                 predicate: customPropPredicate
             )
+            async let expertiseCheckScoresChanged = service.queryRecords(
+                ofType: RecordType.expertiseCheckObjectiveScore,
+                predicate: expertiseCheckScorePredicate
+            )
 
-            let (groupRecords, domainRecords, labelRecords, objectiveRecords, studentRecords, membershipRecords, progressRecords, customPropRecords) =
-            try await (groupsChanged, domainsChanged, labelsChanged, objectivesChanged, studentsChanged, membershipsChanged, progressChanged, customPropsChanged)
+            let (
+                groupRecords,
+                domainRecords,
+                labelRecords,
+                objectiveRecords,
+                studentRecords,
+                membershipRecords,
+                progressRecords,
+                customPropRecords,
+                expertiseCheckScoreRecords
+            ) = try await (
+                groupsChanged,
+                domainsChanged,
+                labelsChanged,
+                objectivesChanged,
+                studentsChanged,
+                membershipsChanged,
+                progressChanged,
+                customPropsChanged,
+                expertiseCheckScoresChanged
+            )
 
             let totalChanges = groupRecords.count + domainRecords.count + labelRecords.count +
                               objectiveRecords.count + studentRecords.count + membershipRecords.count +
-                              progressRecords.count + customPropRecords.count
+                              progressRecords.count + customPropRecords.count + expertiseCheckScoreRecords.count
             
             if totalChanges == 0 {
                 syncLogger.info("Incremental sync: no changes found since last sync")
@@ -3987,7 +4519,7 @@ final class CloudKitStore: ObservableObject {
                 return
             }
             
-            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public)")
+            syncLogger.info("Incremental sync found changes: groups=\(groupRecords.count, privacy: .public) domains=\(domainRecords.count, privacy: .public) labels=\(labelRecords.count, privacy: .public) objectives=\(objectiveRecords.count, privacy: .public) students=\(studentRecords.count, privacy: .public) memberships=\(membershipRecords.count, privacy: .public) progress=\(progressRecords.count, privacy: .public) customProps=\(customPropRecords.count, privacy: .public) expertiseCheckScores=\(expertiseCheckScoreRecords.count, privacy: .public)")
 
             // Upsert order matters: groups/domains first, then students, then child records.
             isApplyingRemoteChanges = true
@@ -4023,6 +4555,10 @@ final class CloudKitStore: ObservableObject {
             if customPropRecords.isEmpty == false {
                 syncLogger.info("Applying \(customPropRecords.count, privacy: .public) custom property changes")
                 applyCustomPropertyChanges(customPropRecords)
+            }
+            if expertiseCheckScoreRecords.isEmpty == false {
+                syncLogger.info("Applying \(expertiseCheckScoreRecords.count, privacy: .public) expertise check objective score changes")
+                applyExpertiseCheckObjectiveScoreChanges(expertiseCheckScoreRecords)
             }
 
             // Advance cursor
@@ -4073,6 +4609,8 @@ final class CloudKitStore: ObservableObject {
             deleteProgressByRecordID(recordID)
         case RecordType.studentCustomProperty:
             deleteCustomPropertyByRecordID(recordID)
+        case RecordType.expertiseCheckObjectiveScore:
+            deleteExpertiseCheckObjectiveScoreByRecordID(recordID)
         default:
             break
         }
@@ -4101,11 +4639,27 @@ final class CloudKitStore: ObservableObject {
             async let studentRecords = service.queryRecords(ofType: RecordType.student, predicate: predicate)
             async let membershipRecords = service.queryRecords(ofType: RecordType.studentGroupMembership, predicate: predicate)
             async let labelRecords = service.queryRecords(ofType: RecordType.categoryLabel, predicate: predicate)
+            async let expertiseCheckScoreRecords = service.queryRecords(ofType: RecordType.expertiseCheckObjectiveScore, predicate: predicate)
 
-            let (remoteGroups, remoteDomains, remoteObjectives, remoteStudents, remoteMemberships, remoteLabels) =
-            try await (groupRecords, domainRecords, objectiveRecords, studentRecords, membershipRecords, labelRecords)
+            let (
+                remoteGroups,
+                remoteDomains,
+                remoteObjectives,
+                remoteStudents,
+                remoteMemberships,
+                remoteLabels,
+                remoteExpertiseCheckScores
+            ) = try await (
+                groupRecords,
+                domainRecords,
+                objectiveRecords,
+                studentRecords,
+                membershipRecords,
+                labelRecords,
+                expertiseCheckScoreRecords
+            )
 
-            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public)")
+            syncLogger.info("Reconciliation fetched: groups=\(remoteGroups.count, privacy: .public) domains=\(remoteDomains.count, privacy: .public) objectives=\(remoteObjectives.count, privacy: .public) students=\(remoteStudents.count, privacy: .public) memberships=\(remoteMemberships.count, privacy: .public) labels=\(remoteLabels.count, privacy: .public) expertiseCheckScores=\(remoteExpertiseCheckScores.count, privacy: .public)")
 
             // Apply ALL remote records - handles adds AND updates
             isApplyingRemoteChanges = true
@@ -4127,6 +4681,9 @@ final class CloudKitStore: ObservableObject {
             }
             if remoteMemberships.isEmpty == false {
                 applyMembershipChanges(remoteMemberships)
+            }
+            if remoteExpertiseCheckScores.isEmpty == false {
+                applyExpertiseCheckObjectiveScoreChanges(remoteExpertiseCheckScores)
             }
 
             // Remove locally-held records that no longer exist on server (deletions)
@@ -4174,6 +4731,13 @@ final class CloudKitStore: ObservableObject {
                 guard isRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key) == false else { continue }
                 guard unconfirmedCategoryLabelRecordNames.contains(key) == false else { continue }
                 deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
+            }
+
+            let remoteExpertiseCheckScoreIDs = Set(remoteExpertiseCheckScores.map { $0.recordID.recordName })
+            let localExpertiseCheckScoreIDs = Set(expertiseCheckScoreRecordNameByID.values)
+            for recordName in localExpertiseCheckScoreIDs.subtracting(remoteExpertiseCheckScoreIDs) {
+                guard isRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: recordName) == false else { continue }
+                deleteExpertiseCheckObjectiveScoreByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             // Progress and custom properties are only reconciled for loaded students
@@ -4287,6 +4851,8 @@ final class CloudKitStore: ObservableObject {
             applyProgressChanges([record])
         case RecordType.studentCustomProperty:
             applyCustomPropertyChanges([record])
+        case RecordType.expertiseCheckObjectiveScore:
+            applyExpertiseCheckObjectiveScoreChanges([record])
         default:
             break
         }
@@ -4333,15 +4899,18 @@ final class CloudKitStore: ObservableObject {
         for record in records {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
+            let overallModeRaw = (record[Field.overallMode] as? String) ?? ExpertiseCheckOverallMode.computed.rawValue
+            let overallMode = ExpertiseCheckOverallMode(rawValue: overallModeRaw) ?? .computed
             let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: domainRecordNameByID)
 
             if let existing = domains.first(where: { $0.id == uuid }) {
                 syncLogger.info("Updating existing domain: \(name, privacy: .public)")
                 existing.name = name
                 existing.colorHex = colorHex
+                existing.overallMode = overallMode
             } else {
                 syncLogger.info("Adding new domain: \(name, privacy: .public)")
-                let d = Domain(name: name, colorHex: colorHex)
+                let d = Domain(name: name, colorHex: colorHex, overallMode: overallMode)
                 d.id = uuid
                 domains.append(d)
             }
@@ -4643,6 +5212,39 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func applyExpertiseCheckObjectiveScoreChanges(_ records: [CKRecord]) {
+        guard records.isEmpty == false else { return }
+        objectWillChange.send()
+
+        var merged: [ExpertiseCheckObjectiveScore] = expertiseCheckObjectiveScores
+        var mergedByID: [UUID: Int] = [:]
+        for (index, score) in merged.enumerated() {
+            mergedByID[score.id] = index
+        }
+
+        for record in records {
+            guard let incoming = mapExpertiseCheckObjectiveScore(from: record) else { continue }
+            if let index = mergedByID[incoming.id] {
+                let existing = merged[index]
+                existing.expertiseCheckId = incoming.expertiseCheckId
+                existing.objectiveId = incoming.objectiveId
+                existing.objectiveCode = incoming.objectiveCode
+                existing.value = incoming.value
+                existing.statusRawValue = incoming.statusRawValue
+                existing.createdAt = incoming.createdAt
+                existing.updatedAt = incoming.updatedAt
+                existing.lastEditedByDisplayName = incoming.lastEditedByDisplayName
+            } else {
+                merged.append(incoming)
+                mergedByID[incoming.id] = merged.count - 1
+            }
+            expertiseCheckScoreRecordNameByID[incoming.id] = record.recordID.recordName
+            unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: record.recordID.recordName)
+        }
+
+        applyExpertiseCheckScores(merged)
+    }
+
     private func deleteGroupByRecordID(_ recordID: CKRecord.ID) {
         let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: groupRecordNameByID)
         syncLogger.info("Deleting group with id: \(uuid.uuidString.prefix(8), privacy: .public)")
@@ -4668,6 +5270,14 @@ final class CloudKitStore: ObservableObject {
         unmarkRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
         pendingDomainCreateIDs.remove(uuid)
         unconfirmedDomainRecordNames.remove(recordID.recordName)
+        let removedScoreIDs = expertiseCheckObjectiveScores
+            .filter { $0.expertiseCheckId == uuid }
+            .map(\.id)
+        expertiseCheckObjectiveScores.removeAll { removedScoreIDs.contains($0.id) }
+        for scoreID in removedScoreIDs {
+            expertiseCheckScoreRecordNameByID.removeValue(forKey: scoreID)
+        }
+        rebuildExpertiseCheckScoreCaches()
 
         for student in students where student.domain?.id == uuid {
             student.domain = nil
@@ -4762,6 +5372,16 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func deleteExpertiseCheckObjectiveScoreByRecordID(_ recordID: CKRecord.ID) {
+        let uuid = resolvedStableID(forRecordName: recordID.recordName, lookup: expertiseCheckScoreRecordNameByID)
+        syncLogger.info("Deleting expertise check score with id: \(uuid.uuidString.prefix(8), privacy: .public)")
+        objectWillChange.send()
+        expertiseCheckScoreRecordNameByID.removeValue(forKey: uuid)
+        unmarkRecordRecentlyWritten(recordType: RecordType.expertiseCheckObjectiveScore, recordName: recordID.recordName)
+        expertiseCheckObjectiveScores.removeAll { $0.id == uuid }
+        rebuildExpertiseCheckScoreCaches()
+    }
+
     // Old reconcile functions removed - now handled by reconcileWithServer()
 
     private enum RecordType {
@@ -4774,6 +5394,7 @@ final class CloudKitStore: ObservableObject {
         static let studentGroupMembership = "StudentGroupMembership"
         static let studentCustomProperty = "StudentCustomProperty"
         static let objectiveProgress = "ObjectiveProgress"
+        static let expertiseCheckObjectiveScore = "ExpertiseCheckObjectiveScore"
     }
 
     private enum Field {
@@ -4791,6 +5412,7 @@ final class CloudKitStore: ObservableObject {
         static let student = "student"
         static let studentRef = "studentRef"
         static let objectiveRef = "objectiveRef"
+        static let expertiseCheckRef = "expertiseCheckRef"
         static let objectiveCode = "objectiveCode"
         static let completionPercentage = "completionPercentage"
         static let status = "status"
@@ -4806,6 +5428,7 @@ final class CloudKitStore: ObservableObject {
         static let createdAt = "createdAt"
         static let updatedAt = "updatedAt"
         static let lastEditedByDisplayName = "lastEditedByDisplayName"
+        static let overallMode = "overallMode"
     }
 }
 

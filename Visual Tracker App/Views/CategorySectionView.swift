@@ -111,7 +111,7 @@ struct CategorySectionView: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(childObjectives) { child in
+                    ForEach(childObjectives, id: \.id) { child in
                         ObjectiveTreeView(
                             rootObjective: child,
                             student: student,

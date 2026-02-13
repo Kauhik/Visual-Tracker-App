@@ -31,7 +31,7 @@ struct ObjectiveTreeView: View {
             )
             
             // Recursively display children
-            ForEach(childObjectives) { child in
+            ForEach(childObjectives, id: \.id) { child in
                 ObjectiveTreeView(
                     rootObjective: child,
                     student: student,

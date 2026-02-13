@@ -59,6 +59,7 @@ final class CloudKitSyncCoordinator {
         static let studentGroupMembership = "vt_sub_studentGroupMembership"
         static let objectiveProgress = "vt_sub_objectiveProgress"
         static let studentCustomProperty = "vt_sub_studentCustomProperty"
+        static let expertiseCheckObjectiveScore = "vt_sub_expertiseCheckObjectiveScore"
     }
 
     // Record type names (must match CloudKit schema)
@@ -71,6 +72,7 @@ final class CloudKitSyncCoordinator {
         static let student = "Student"
         static let studentCustomProperty = "StudentCustomProperty"
         static let objectiveProgress = "ObjectiveProgress"
+        static let expertiseCheckObjectiveScore = "ExpertiseCheckObjectiveScore"
     }
 
     private let subscriptionMap: [String: String] = [
@@ -81,7 +83,8 @@ final class CloudKitSyncCoordinator {
         SubscriptionID.learningObjective: RecordType.learningObjective,
         SubscriptionID.studentGroupMembership: RecordType.studentGroupMembership,
         SubscriptionID.objectiveProgress: RecordType.objectiveProgress,
-        SubscriptionID.studentCustomProperty: RecordType.studentCustomProperty
+        SubscriptionID.studentCustomProperty: RecordType.studentCustomProperty,
+        SubscriptionID.expertiseCheckObjectiveScore: RecordType.expertiseCheckObjectiveScore
     ]
 
     private enum SyncMode: String {
@@ -356,6 +359,12 @@ final class CloudKitSyncCoordinator {
             recordType: RecordType.studentCustomProperty,
             predicate: predicate
         ) { successCount += 1 } else { failureCount += 1 }
+
+        if await createQuerySubscriptionIfPossible(
+            subscriptionID: SubscriptionID.expertiseCheckObjectiveScore,
+            recordType: RecordType.expertiseCheckObjectiveScore,
+            predicate: predicate
+        ) { successCount += 1 } else { failureCount += 1 }
         
         subscriptionsRegistered = failureCount == 0
         logger.info("Subscription setup complete: \(successCount, privacy: .public) succeeded, \(failureCount, privacy: .public) failed")
@@ -422,7 +431,9 @@ final class CloudKitSyncCoordinator {
             logger.info("📬 Remote change: type=\(recordType, privacy: .public) id=\(recordID.recordName.prefix(8), privacy: .public)... reason=\(reasonStr, privacy: .public)")
 
             // High-churn record types are better batched through debounced sync to reduce UI churn.
-            if recordType == RecordType.objectiveProgress || recordType == RecordType.studentCustomProperty {
+            if recordType == RecordType.objectiveProgress ||
+                recordType == RecordType.studentCustomProperty ||
+                recordType == RecordType.expertiseCheckObjectiveScore {
                 logger.debug("Deferring immediate apply for high-churn record type \(recordType, privacy: .public)")
             } else {
                 // Apply the specific change immediately for instant feedback.
