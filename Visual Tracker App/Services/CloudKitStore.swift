@@ -158,10 +158,14 @@ final class CloudKitStore: ObservableObject {
     @Published private(set) var nextUndoActionLabel: String?
     @Published private(set) var nextRedoActionLabel: String?
     @Published private(set) var isUndoRedoInProgress: Bool = false
+    @Published private(set) var sheets: [CohortSheet] = []
+    @Published private(set) var activeSheet: CohortSheet?
+    @Published private(set) var isSheetMutationInProgress: Bool = false
 
     private let service: CloudKitService
     private let isPreviewData: Bool
-    private let cohortId: String = "main"
+    private let defaultCohortId: String = "main"
+    private let activeCohortDefaultsKey: String = "VisualTrackerApp.activeCohortId"
     private var cohortRecordID: CKRecord.ID?
     private var hasLoaded: Bool = false
 
@@ -183,6 +187,7 @@ final class CloudKitStore: ObservableObject {
     private var pendingExpertiseCheckModeUpdateIDs: Set<UUID> = []
     private var pendingLearningObjectiveCreateIDs: Set<UUID> = []
     private var pendingCategoryLabelCreateKeys: Set<String> = []
+    private var categoryLabelRecordNameByCode: [String: String] = [:]
     private var unconfirmedGroupRecordNames: Set<String> = []
     private var unconfirmedDomainRecordNames: Set<String> = []
     private var unconfirmedLearningObjectiveRecordNames: Set<String> = []
@@ -215,7 +220,17 @@ final class CloudKitStore: ObservableObject {
     private var snapshotPersistTask: Task<Void, Never>?
     private let progressRebuildDebounceNanoseconds: UInt64 = 300_000_000
     private let snapshotPersistDebounceNanoseconds: UInt64 = 400_000_000
-    private var lastSyncDateDefaultsKey: String { "VisualTrackerApp.lastSyncDate.\(cohortId)" }
+    private var activeCohortId: String {
+        activeSheet?.cohortId
+            ?? UserDefaults.standard.string(forKey: activeCohortDefaultsKey)
+            ?? defaultCohortId
+    }
+
+    private func lastSyncDateDefaultsKey(for cohortId: String) -> String {
+        "VisualTrackerApp.lastSyncDate.\(cohortId)"
+    }
+
+    private var lastSyncDateDefaultsKey: String { lastSyncDateDefaultsKey(for: activeCohortId) }
 
     private var lastSyncDate: Date {
         get {
@@ -399,6 +414,7 @@ final class CloudKitStore: ObservableObject {
 
     func loadIfNeeded() async {
         guard hasLoaded == false else { return }
+        await loadSheets()
         if restoreSnapshotIfAvailable() {
             hasLoaded = true
             hasCachedSnapshotData = true
@@ -1297,7 +1313,8 @@ final class CloudKitStore: ObservableObject {
         }
         categoryLabels.sort { $0.key < $1.key }
 
-        let recordID = CKRecord.ID(recordName: normalizedCode)
+        let activeCohortRecordName = cohortRecordID.recordName
+        let recordID = CKRecord.ID(recordName: "\(activeCohortRecordName)::\(normalizedCode)")
         if isNewLabel {
             unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
         }
@@ -1313,6 +1330,7 @@ final class CloudKitStore: ObservableObject {
             try await service.save(record: record)
             pendingCategoryLabelCreateKeys.remove(normalizedCode)
             unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
+            categoryLabelRecordNameByCode[normalizedCode] = recordID.recordName
             markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
             syncCoordinator?.noteLocalWrite()
         } catch {
@@ -1596,9 +1614,180 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    func loadSheets() async {
+        do {
+            // Avoid TRUEPREDICATE on public DB cohorts because CloudKit may route that
+            // through implicit recordName indexing, which is not guaranteed to be queryable
+            // for this record type in development schemas.
+            let records = try await service.queryRecords(
+                ofType: RecordType.cohort,
+                predicate: NSPredicate(format: "%K != %@", Field.cohortId, ""),
+                sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
+            )
+            var mapped = records.map { mapSheet(from: $0) }
+            if mapped.isEmpty {
+                _ = try await ensureCohortRecord(for: defaultCohortId)
+                let created = try await service.queryRecords(
+                    ofType: RecordType.cohort,
+                    predicate: NSPredicate(format: "cohortId == %@", defaultCohortId),
+                    sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
+                )
+                mapped = created.map { mapSheet(from: $0) }
+            }
+
+            sheets = mapped.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            if let active = sheets.first(where: { $0.cohortId == activeCohortId }) ?? sheets.first(where: { $0.cohortId == defaultCohortId }) ?? sheets.first {
+                activeSheet = active
+                UserDefaults.standard.set(active.cohortId, forKey: activeCohortDefaultsKey)
+            }
+        } catch {
+            lastErrorMessage = "Failed to load sheets: \(error.localizedDescription)"
+        }
+    }
+
+    func createSheet(name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+        guard beginSheetMutation() else { return }
+        defer { endSheetMutation() }
+
+        do {
+            let cohortId = UUID().uuidString.lowercased()
+            let record = try await ensureCohortRecord(for: cohortId, name: trimmed)
+            await loadSheets()
+            let mapped = mapSheet(from: record)
+            await switchSheetInternal(to: mapped)
+            await ensureLearningObjectivesSeededIfNeeded()
+            await ensurePresetDomains()
+        } catch {
+            lastErrorMessage = "Failed to create sheet: \(error.localizedDescription)"
+        }
+    }
+
+    func renameSheet(sheet: CohortSheet, name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+        guard beginSheetMutation() else { return }
+        defer { endSheetMutation() }
+
+        do {
+            let recordID = CKRecord.ID(recordName: sheet.id)
+            let record = try await service.fetchRecord(with: recordID)
+            record[Field.name] = trimmed
+            applyAuditFields(to: record, createdAt: (record[Field.createdAt] as? Date) ?? Date())
+            let saved = try await service.save(record: record)
+            var updated = mapSheet(from: saved)
+            if updated.cohortId.isEmpty {
+                updated.cohortId = sheet.cohortId
+            }
+            sheets = sheets.map { $0.id == updated.id ? updated : $0 }
+            if activeSheet?.id == updated.id {
+                activeSheet = updated
+            }
+            sheets.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        } catch {
+            lastErrorMessage = "Failed to rename sheet: \(error.localizedDescription)"
+        }
+    }
+
+    func switchSheet(to sheet: CohortSheet) async {
+        guard activeSheet?.id != sheet.id else { return }
+        guard beginSheetMutation() else { return }
+        defer { endSheetMutation() }
+        await switchSheetInternal(to: sheet)
+    }
+
+    func deleteSheet(sheet: CohortSheet) async {
+        guard beginSheetMutation() else { return }
+        defer { endSheetMutation() }
+
+        guard sheet.cohortId != defaultCohortId else {
+            lastErrorMessage = "The main sheet cannot be deleted."
+            return
+        }
+        guard activeSheet?.id != sheet.id else {
+            lastErrorMessage = "Switch sheets before deleting this sheet."
+            return
+        }
+        guard await requireWriteAccess() else { return }
+
+        isLoading = true
+        resetProgress = ResetProgress(message: "Deleting sheet...", step: 0, totalSteps: 10)
+        defer {
+            isLoading = false
+            resetProgress = nil
+        }
+
+        do {
+            let sheetRecordID = CKRecord.ID(recordName: sheet.id)
+
+            resetProgress = ResetProgress(message: "Deleting objective progress...", step: 1, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.objectiveProgress, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting custom properties...", step: 2, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.studentCustomProperty, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting memberships...", step: 3, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.studentGroupMembership, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting review scores...", step: 4, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.expertiseCheckObjectiveScore, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting students...", step: 5, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.student, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting groups...", step: 6, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.cohortGroup, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting success criteria and milestones...", step: 7, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.learningObjective, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting category labels...", step: 8, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.categoryLabel, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting expertise checks...", step: 9, totalSteps: 10)
+            try await deleteAllRecords(ofType: RecordType.domain, cohortRecordID: sheetRecordID)
+            resetProgress = ResetProgress(message: "Deleting sheet record...", step: 10, totalSteps: 10)
+            try await service.delete(recordID: sheetRecordID)
+
+            try? CloudKitStoreSnapshotCache.remove(cohortId: sheet.cohortId)
+            UserDefaults.standard.removeObject(forKey: lastSyncDateDefaultsKey(for: sheet.cohortId))
+
+            if UserDefaults.standard.string(forKey: activeCohortDefaultsKey) == sheet.cohortId {
+                UserDefaults.standard.set(defaultCohortId, forKey: activeCohortDefaultsKey)
+            }
+
+            sheets.removeAll { $0.id == sheet.id }
+            await loadSheets()
+        } catch {
+            lastErrorMessage = "Failed to delete sheet: \(error.localizedDescription)"
+        }
+    }
+
+    private func switchSheetInternal(to sheet: CohortSheet) async {
+        syncCoordinator?.stop()
+        syncCoordinator = nil
+
+        activeSheet = sheet
+        UserDefaults.standard.set(sheet.cohortId, forKey: activeCohortDefaultsKey)
+        cohortRecordID = nil
+        clearInMemoryDataForSheetSwitch()
+        _ = restoreSnapshotIfAvailable()
+        await reloadAllData(force: true)
+    }
+
+    private func beginSheetMutation() -> Bool {
+        guard isSheetMutationInProgress == false else { return false }
+        isSheetMutationInProgress = true
+        return true
+    }
+
+    private func endSheetMutation() {
+        isSheetMutationInProgress = false
+    }
+
     private func ensureCohortRecord() async throws -> CKRecord {
+        try await ensureCohortRecord(for: activeCohortId)
+    }
+
+    private func ensureCohortRecord(for cohortId: String, name: String? = nil) async throws -> CKRecord {
         if let cohortRecordID {
-            return try await service.fetchRecord(with: cohortRecordID)
+            let record = try await service.fetchRecord(with: cohortRecordID)
+            if (record[Field.cohortId] as? String) == cohortId {
+                return record
+            }
         }
 
         let predicate = NSPredicate(format: "cohortId == %@", cohortId)
@@ -1611,7 +1800,7 @@ final class CloudKitStore: ObservableObject {
         let recordID = CKRecord.ID(recordName: cohortId)
         let record = CKRecord(recordType: RecordType.cohort, recordID: recordID)
         record[Field.cohortId] = cohortId
-        record[Field.name] = "Main Cohort"
+        record[Field.name] = name ?? "Main Cohort"
         applyAuditFields(to: record, createdAt: Date())
         return try await service.save(record: record)
     }
@@ -1929,6 +2118,7 @@ final class CloudKitStore: ObservableObject {
     private func mapCategoryLabel(from record: CKRecord) -> CategoryLabel {
         let code = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
         let title = record[Field.title] as? String ?? code
+        categoryLabelRecordNameByCode[code] = record.recordID.recordName
         return CategoryLabel(code: code, title: title)
     }
 
@@ -3712,8 +3902,24 @@ final class CloudKitStore: ObservableObject {
 
     private func clearLocalCategoryLabelState() {
         categoryLabels.removeAll()
+        categoryLabelRecordNameByCode.removeAll()
         pendingCategoryLabelCreateKeys.removeAll()
         unconfirmedCategoryLabelRecordNames.removeAll()
+    }
+
+    private func clearInMemoryDataForSheetSwitch() {
+        clearLocalObjectiveProgressState()
+        clearLocalCustomPropertyState()
+        clearLocalMembershipState()
+        clearLocalStudentState()
+        clearLocalGroupState()
+        clearLocalCategoryLabelState()
+        clearLocalDomainState()
+        clearLocalLearningObjectiveState()
+        selectedScope = .overall
+        selectedStudentId = nil
+        lastErrorMessage = nil
+        lastSyncDate = .distantPast
     }
 
     private func clearLocalDomainState() {
@@ -3724,6 +3930,7 @@ final class CloudKitStore: ObservableObject {
         unconfirmedDomainRecordNames.removeAll()
         expertiseCheckObjectiveScores.removeAll()
         expertiseCheckScoreRecordNameByID.removeAll()
+        categoryLabelRecordNameByCode.removeAll()
         expertiseCheckScoreByDomainObjectiveID.removeAll()
         expertiseCheckScoreByDomainObjectiveCode.removeAll()
         for student in students {
@@ -3787,6 +3994,14 @@ final class CloudKitStore: ObservableObject {
         expertiseCheckScoreByDomainObjectiveCode.removeAll()
     }
 
+    private func mapSheet(from record: CKRecord) -> CohortSheet {
+        let cohortId = record[Field.cohortId] as? String ?? record.recordID.recordName
+        let name = record[Field.name] as? String ?? "Sheet"
+        let createdAt = record[Field.createdAt] as? Date ?? Date()
+        let updatedAt = record[Field.updatedAt] as? Date ?? createdAt
+        return CohortSheet(id: record.recordID.recordName, cohortId: cohortId, name: name, createdAt: createdAt, updatedAt: updatedAt)
+    }
+
     private func deduplicatedProgress(_ records: [ObjectiveProgress]) -> [ObjectiveProgress] {
         var byKey: [String: ObjectiveProgress] = [:]
         for progress in records {
@@ -3804,7 +4019,7 @@ final class CloudKitStore: ObservableObject {
 
     private func restoreSnapshotIfAvailable() -> Bool {
         guard isPreviewData == false else { return false }
-        guard let snapshot = CloudKitStoreSnapshotCache.load(cohortId: cohortId) else { return false }
+        guard let snapshot = CloudKitStoreSnapshotCache.load(cohortId: activeCohortId) else { return false }
 
         clearRecordTrackingStateForFullReload()
 
@@ -4063,7 +4278,7 @@ final class CloudKitStore: ObservableObject {
             if Task.isCancelled { return }
             let snapshot = self.makeSnapshot()
             do {
-                try CloudKitStoreSnapshotCache.save(snapshot, cohortId: self.cohortId)
+                try CloudKitStoreSnapshotCache.save(snapshot, cohortId: self.activeCohortId)
                 self.cachedSnapshotDate = snapshot.savedAt
                 self.hasCachedSnapshotData = true
             } catch {
@@ -4378,6 +4593,7 @@ final class CloudKitStore: ObservableObject {
 
     private func mergeFetchedCategoryLabels(_ fetched: [CategoryLabel]) {
         let fetchedByKey = Dictionary(uniqueKeysWithValues: fetched.map { ($0.key, $0) })
+        let fetchedKeys = Set(fetchedByKey.keys)
         for existing in categoryLabels {
             guard let incoming = fetchedByKey[existing.key] else { continue }
             existing.title = incoming.title
@@ -4386,6 +4602,7 @@ final class CloudKitStore: ObservableObject {
             categoryLabels.append(incoming)
         }
         categoryLabels.removeAll { fetchedByKey[$0.key] == nil }
+        categoryLabelRecordNameByCode = categoryLabelRecordNameByCode.filter { fetchedKeys.contains($0.key) }
         categoryLabels.sort { $0.key < $1.key }
     }
 
@@ -5301,13 +5518,14 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func deleteCategoryLabelByRecordID(_ recordID: CKRecord.ID) {
-        let key = recordID.recordName
+        let key = categoryLabelRecordNameByCode.first(where: { $0.value == recordID.recordName })?.key ?? recordID.recordName
         syncLogger.info("Deleting category label: \(key, privacy: .public)")
         objectWillChange.send()
         categoryLabels.removeAll { $0.key == key || $0.code == key }
-        unmarkRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key)
+        categoryLabelRecordNameByCode.removeValue(forKey: key)
+        unmarkRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
         pendingCategoryLabelCreateKeys.remove(key)
-        unconfirmedCategoryLabelRecordNames.remove(key)
+        unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
     }
 
     private func deleteLearningObjectiveByRecordID(_ recordID: CKRecord.ID) {
@@ -5434,7 +5652,7 @@ final class CloudKitStore: ObservableObject {
 
 extension CloudKitStore {
     func makeCSVExportPayload() -> CSVExportPayload {
-        let cohortRecordName = cohortRecordID?.recordName ?? cohortId
+        let cohortRecordName = cohortRecordID?.recordName ?? activeCohortId
         let studentRecordNameByID = self.studentRecordNameByID
         let groupRecordNameByID = self.groupRecordNameByID
         let membershipRecordNameByID = self.membershipRecordNameByID

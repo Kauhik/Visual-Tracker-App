@@ -1,5 +1,6 @@
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/CategoryLabel.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/CohortGroup.swift
+/Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/CohortSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/CustomPropertyRow.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/Domain.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Models/LearningObjective.swift
@@ -33,6 +34,7 @@
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageDomainsSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageGroupsSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageMilestonesSheet.swift
+/Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageSheetsSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageStudentsSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ManageSuccessCriteriaSheet.swift
 /Users/kaushikmanian/Desktop/Apps/Visual\ Tracker\ App/Visual\ Tracker\ App/Views/ObjectiveRowView.swift

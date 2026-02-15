@@ -137,4 +137,10 @@ enum CloudKitStoreSnapshotCache {
         let data = try encoder.encode(snapshot)
         try data.write(to: url, options: [.atomic])
     }
+
+    static func remove(cohortId: String) throws {
+        let url = try snapshotURL(cohortId: cohortId)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
 }

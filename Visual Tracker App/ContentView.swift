@@ -74,6 +74,11 @@ struct ContentView: View {
                 store.selectedStudentId = nil
             }
         }
+        .onChange(of: store.activeSheet?.id) { _, _ in
+            selectedGroup = nil
+            store.selectedStudentId = nil
+            store.selectedScope = .overall
+        }
         .task {
             await store.loadIfNeeded()
             await store.ensurePresetDomains()

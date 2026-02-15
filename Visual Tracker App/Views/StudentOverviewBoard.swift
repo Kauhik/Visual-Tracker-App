@@ -12,6 +12,7 @@ struct StudentOverviewBoard: View {
     @State private var showingManageDomains: Bool = false
     @State private var showingManageSuccessCriteria: Bool = false
     @State private var showingManageMilestones: Bool = false
+    @State private var showingManageSheets: Bool = false
     @State private var studentPendingDelete: Student?
     @State private var searchText: String = ""
     @State private var debouncedSearchText: String = ""
@@ -179,6 +180,9 @@ struct StudentOverviewBoard: View {
         .sheet(isPresented: $showingManageMilestones) {
             ManageMilestonesSheet()
         }
+        .sheet(isPresented: $showingManageSheets) {
+            ManageSheetsSheet()
+        }
         .confirmationDialog(
             "Delete Student",
             isPresented: Binding(
@@ -233,9 +237,22 @@ struct StudentOverviewBoard: View {
                 Text(students.isEmpty ? "No students yet" : "\(students.count) student\(students.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if let activeSheet = store.activeSheet {
+                    Text("Sheet: \(activeSheet.name)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Spacer()
+
+            Button {
+                showingManageSheets = true
+            } label: {
+                Label("Manage Sheets", systemImage: "square.stack.3d.up")
+            }
+            .buttonStyle(.bordered)
 
             Button {
                 showingManageStudents = true

@@ -34,22 +34,9 @@
 		80BC947B2F308F6A00667F8B /* CloudKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CloudKit.framework; path = System/Library/Frameworks/CloudKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		800DD3372F3D775200975F60 /* Exceptions for "Visual Tracker App" folder in "Visual Tracker App" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"Visual-Tracker-App-Info.plist",
-			);
-			target = 809B2D242F285985007F9E7B /* Visual Tracker App */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		809B2D272F285985007F9E7B /* Visual Tracker App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				800DD3372F3D775200975F60 /* Exceptions for "Visual Tracker App" folder in "Visual Tracker App" target */,
-			);
 			path = "Visual Tracker App";
 			sourceTree = "<group>";
 		};
