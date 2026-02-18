@@ -5653,6 +5653,19 @@ final class CloudKitStore: ObservableObject {
 extension CloudKitStore {
     func makeCSVExportPayload() -> CSVExportPayload {
         let cohortRecordName = cohortRecordID?.recordName ?? activeCohortId
+        let activeSheetRecordName = activeSheet?.id ?? cohortRecordName
+        let activeSheetCohortId = activeSheet?.cohortId ?? activeCohortId
+        let activeSheetName = activeSheet?.name ?? "Main Cohort"
+        let sheetMetadata = sheets.map { sheet in
+            CSVExportPayload.SheetMetadata(
+                recordName: sheet.id,
+                cohortId: sheet.cohortId,
+                name: sheet.name,
+                createdAt: sheet.createdAt,
+                updatedAt: sheet.updatedAt,
+                isActive: sheet.id == activeSheetRecordName
+            )
+        }
         let studentRecordNameByID = self.studentRecordNameByID
         let groupRecordNameByID = self.groupRecordNameByID
         let membershipRecordNameByID = self.membershipRecordNameByID
@@ -5660,15 +5673,22 @@ extension CloudKitStore {
         let learningObjectiveRecordNameByID = self.learningObjectiveRecordNameByID
         let progressRecordNameByID = self.progressRecordNameByID
         let customPropertyRecordNameByID = self.customPropertyRecordNameByID
+        let expertiseCheckScoreRecordNameByID = self.expertiseCheckScoreRecordNameByID
+        let exportedLearningObjectives = allLearningObjectives.isEmpty ? learningObjectives : allLearningObjectives
 
         return CSVExportPayload(
             cohortRecordName: cohortRecordName,
+            activeSheetRecordName: activeSheetRecordName,
+            activeSheetCohortId: activeSheetCohortId,
+            activeSheetName: activeSheetName,
+            sheets: sheetMetadata,
             students: students,
             groups: groups,
             memberships: memberships,
             domains: domains,
-            learningObjectives: learningObjectives,
+            learningObjectives: exportedLearningObjectives,
             categoryLabels: categoryLabels,
+            expertiseCheckObjectiveScores: expertiseCheckObjectiveScores,
             studentRecordName: { student in
                 studentRecordNameByID[student.id] ?? student.id.uuidString
             },
@@ -5689,6 +5709,9 @@ extension CloudKitStore {
             },
             customPropertyRecordName: { property in
                 customPropertyRecordNameByID[property.id] ?? property.id.uuidString
+            },
+            expertiseCheckScoreRecordName: { score in
+                expertiseCheckScoreRecordNameByID[score.id] ?? score.id.uuidString
             }
         )
     }

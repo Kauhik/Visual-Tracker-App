@@ -1002,13 +1002,22 @@ struct StudentDetailView: View {
             return
         }
 
-        let payload = store.makeCSVExportPayload()
         isExportingData = true
 
         Task(priority: .userInitiated) {
             do {
-                let exporter = CSVExportService()
-                let result = try exporter.exportZip(payload: payload, destinationURL: destinationURL)
+                let payload = await MainActor.run { store.makeCSVExportPayload() }
+                let result: CSVExportResult = try await withCheckedThrowingContinuation { continuation in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            let exporter = CSVExportService()
+                            let exportResult = try exporter.exportZip(payload: payload, destinationURL: destinationURL)
+                            continuation.resume(returning: exportResult)
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
                 await MainActor.run {
                     isExportingData = false
                     exportSuccessMessage = "Exported \(result.exportedFiles.count) CSV files to \(result.outputURL.path)."
