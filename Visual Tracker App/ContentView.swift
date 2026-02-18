@@ -42,6 +42,21 @@ struct ContentView: View {
         )
     }
 
+    private var cacheToastStyle: ToastPillView.Style {
+        store.isOfflineUsingSnapshot ? .warning : .info
+    }
+
+    private var cacheToastContent: (title: String, subtitle: String?)? {
+        guard let message = store.cacheStatusMessage else { return nil }
+        let segments = message
+            .split(separator: "•", maxSplits: 1)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if segments.count == 2 {
+            return (title: segments[0], subtitle: segments[1])
+        }
+        return (title: message, subtitle: nil)
+    }
+
     var body: some View {
         NavigationSplitView {
             StudentOverviewBoard(selectedStudentId: selectedStudentIdBinding)
@@ -126,62 +141,75 @@ struct ContentView: View {
             }
         }
         .overlay(alignment: .top) {
-            if store.requiresICloudLogin || store.cacheStatusMessage != nil {
+            if store.requiresICloudLogin {
                 VStack(spacing: zoomManager.scaled(8)) {
-                    if store.requiresICloudLogin {
-                        HStack(spacing: zoomManager.scaled(12)) {
-                            Image(systemName: "icloud.slash")
-                                .font(.title3)
+                    HStack(spacing: zoomManager.scaled(12)) {
+                        Image(systemName: "icloud.slash")
+                            .font(.title3)
 
-                            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
-                                Text("Read-only mode")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                Text("Sign in to iCloud to enable edits and syncing.")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-
-                            Spacer()
-
-                            Button("Open iCloud Settings") {
-                                store.openICloudSettings()
-                            }
-                            .buttonStyle(.bordered)
-
-                            Button("Retry") {
-                                Task { await store.reloadAllData() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        .padding(zoomManager.scaled(12))
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(12)))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: zoomManager.scaled(12))
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        )
-                    }
-
-                    if let cacheStatusMessage = store.cacheStatusMessage {
-                        HStack(spacing: zoomManager.scaled(8)) {
-                            Image(systemName: store.isOfflineUsingSnapshot ? "wifi.exclamationmark" : "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                        VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
+                            Text("Read-only mode")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            Text("Sign in to iCloud to enable edits and syncing.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(cacheStatusMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
+                                .foregroundColor(.secondary)
                         }
-                        .padding(.horizontal, zoomManager.scaled(10))
-                        .padding(.vertical, zoomManager.scaled(6))
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(10)))
+
+                        Spacer()
+
+                        Button("Open iCloud Settings") {
+                            store.openICloudSettings()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Retry") {
+                            Task { await store.reloadAllData() }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
+                    .padding(zoomManager.scaled(12))
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: zoomManager.scaled(12)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: zoomManager.scaled(12))
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
                 }
                 .padding(.horizontal, zoomManager.scaled(16))
                 .padding(.top, zoomManager.scaled(12))
             }
+        }
+        .overlay(alignment: .top) {
+            Group {
+                if let cacheToastContent {
+                    HStack {
+                        Spacer(minLength: 0)
+                        ToastPillView(
+                            style: cacheToastStyle,
+                            title: cacheToastContent.title,
+                            subtitle: cacheToastContent.subtitle,
+                            showsIcon: true,
+                            autoDismissSeconds: nil
+                        )
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity
+                                    .combined(with: .offset(y: -10))
+                                    .animation(.easeOut(duration: 0.22)),
+                                removal: .opacity
+                                    .combined(with: .offset(y: -16))
+                                    .animation(.easeIn(duration: 0.16))
+                            )
+                        )
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .padding(.horizontal, zoomManager.scaled(16))
+            .padding(.top, zoomManager.scaled(8))
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.22), value: store.cacheStatusMessage)
         }
         .alert("CloudKit Error", isPresented: $showingError) {
             Button("OK", role: .cancel) { }
