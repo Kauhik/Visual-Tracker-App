@@ -10,7 +10,7 @@ struct ManageSheetsSheet: View {
     @State private var sheetPendingDelete: CohortSheet?
 
     private var isBusy: Bool {
-        store.isLoading || store.isSheetMutationInProgress
+        store.isSheetOperationInFlight
     }
 
     var body: some View {
@@ -47,7 +47,7 @@ struct ManageSheetsSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if store.activeSheet?.id == sheet.id {
+                        if store.activeSheet?.cohortId == sheet.cohortId {
                             Text("Active")
                                 .font(.caption)
                                 .padding(.horizontal, 8)
@@ -58,7 +58,7 @@ struct ManageSheetsSheet: View {
                         Button("Switch") {
                             Task { await store.switchSheet(to: sheet) }
                         }
-                        .disabled(isBusy || store.activeSheet?.id == sheet.id)
+                        .disabled(isBusy || store.activeSheet?.cohortId == sheet.cohortId)
                         Button("Rename") {
                             renamingSheet = sheet
                             renameText = sheet.name
@@ -67,7 +67,7 @@ struct ManageSheetsSheet: View {
                         Button("Delete", role: .destructive) {
                             sheetPendingDelete = sheet
                         }
-                        .disabled(isBusy || store.activeSheet?.id == sheet.id || sheet.cohortId == "main")
+                        .disabled(isBusy || sheet.cohortId == "main")
                     }
                 }
             }

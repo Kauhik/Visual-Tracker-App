@@ -134,6 +134,11 @@ private struct UndoOperation {
     let redo: @MainActor (CloudKitStore) async -> Bool
 }
 
+private struct PendingSheetNameOverride {
+    let name: String
+    let recordedAt: Date
+}
+
 @MainActor
 final class CloudKitStore: ObservableObject {
     @Published var isLoading: Bool = false
@@ -160,6 +165,7 @@ final class CloudKitStore: ObservableObject {
     @Published private(set) var isUndoRedoInProgress: Bool = false
     @Published private(set) var sheets: [CohortSheet] = []
     @Published private(set) var activeSheet: CohortSheet?
+    @Published private(set) var isSheetOperationInFlight: Bool = false
     @Published private(set) var isSheetMutationInProgress: Bool = false
 
     private let service: CloudKitService
@@ -168,6 +174,12 @@ final class CloudKitStore: ObservableObject {
     private let activeCohortDefaultsKey: String = "VisualTrackerApp.activeCohortId"
     private var cohortRecordID: CKRecord.ID?
     private var hasLoaded: Bool = false
+    private var sheetLoadRequestSequence: UInt64 = 0
+    private var latestAppliedSheetLoadRequest: UInt64 = 0
+    private var sheetMutationSequence: UInt64 = 0
+    private var pendingSheetPresenceByRecordName: [String: Date] = [:]
+    private var pendingSheetNameOverridesByRecordName: [String: PendingSheetNameOverride] = [:]
+    private let pendingSheetMutationGraceInterval: TimeInterval = 30
 
     private var progressLoadedStudentIDs: Set<UUID> = []
     private var customPropertiesLoadedStudentIDs: Set<UUID> = []
@@ -216,6 +228,8 @@ final class CloudKitStore: ObservableObject {
     private var isApplyingRemoteChanges: Bool = false
 
     private var syncCoordinator: CloudKitSyncCoordinator?
+    private var sheetSwitchTask: Task<Void, Never>?
+    private var activeSheetSwitchToken: UUID?
     private var progressRebuildTask: Task<Void, Never>?
     private var snapshotPersistTask: Task<Void, Never>?
     private let progressRebuildDebounceNanoseconds: UInt64 = 300_000_000
@@ -1615,6 +1629,15 @@ final class CloudKitStore: ObservableObject {
     }
 
     func loadSheets() async {
+        await loadSheets(expectedMutationSequence: nil)
+    }
+
+    private func loadSheets(expectedMutationSequence: UInt64?) async {
+        sheetLoadRequestSequence &+= 1
+        let requestID = sheetLoadRequestSequence
+        let loadStartMutationSequence = sheetMutationSequence
+        let wasMutatingAtStart = isSheetMutationInProgress
+
         do {
             // Avoid TRUEPREDICATE on public DB cohorts because CloudKit may route that
             // through implicit recordName indexing, which is not guaranteed to be queryable
@@ -1624,51 +1647,79 @@ final class CloudKitStore: ObservableObject {
                 predicate: NSPredicate(format: "%K != %@", Field.cohortId, ""),
                 sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
             )
-            var mapped = records.map { mapSheet(from: $0) }
-            if mapped.isEmpty {
-                _ = try await ensureCohortRecord(for: defaultCohortId)
+            let fetched = records.map { mapSheet(from: $0) }
+            var dedupedFetched = deduplicateSheets(fetched)
+
+            if dedupedFetched.isEmpty {
+                _ = try await ensureCohortRecord(for: defaultCohortId, name: "Main Cohort")
                 let created = try await service.queryRecords(
                     ofType: RecordType.cohort,
                     predicate: NSPredicate(format: "cohortId == %@", defaultCohortId),
                     sortDescriptors: [NSSortDescriptor(key: Field.createdAt, ascending: true)]
                 )
-                mapped = created.map { mapSheet(from: $0) }
+                dedupedFetched = deduplicateSheets(created.map { mapSheet(from: $0) })
             }
 
-            sheets = mapped.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            if let active = sheets.first(where: { $0.cohortId == activeCohortId }) ?? sheets.first(where: { $0.cohortId == defaultCohortId }) ?? sheets.first {
-                activeSheet = active
-                UserDefaults.standard.set(active.cohortId, forKey: activeCohortDefaultsKey)
+            let merged = mergeFetchedSheets(dedupedFetched)
+            guard shouldApplySheetLoad(
+                requestID: requestID,
+                expectedMutationSequence: expectedMutationSequence,
+                loadStartMutationSequence: loadStartMutationSequence,
+                wasMutatingAtStart: wasMutatingAtStart
+            ) else {
+                syncLogger.debug("Skipping stale sheet load request \(requestID, privacy: .public)")
+                return
             }
+
+            applyLoadedSheets(merged)
+            syncLogger.info(
+                "Loaded sheets fetched=\(fetched.count, privacy: .public) deduped=\(dedupedFetched.count, privacy: .public) final=\(self.sheets.count, privacy: .public)"
+            )
         } catch {
             lastErrorMessage = "Failed to load sheets: \(error.localizedDescription)"
+            syncLogger.error("Failed to load sheets: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func createSheet(name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-        guard beginSheetMutation() else { return }
+        guard beginSheetMutation() != nil else { return }
         defer { endSheetMutation() }
 
         do {
-            let cohortId = UUID().uuidString.lowercased()
+            let cohortId = makeUniqueSheetCohortID()
+            syncLogger.info("Create sheet started cohortId=\(cohortId, privacy: .public) name=\(trimmed, privacy: .public)")
             let record = try await ensureCohortRecord(for: cohortId, name: trimmed)
-            await loadSheets()
-            let mapped = mapSheet(from: record)
-            await switchSheetInternal(to: mapped)
-            await ensureLearningObjectivesSeededIfNeeded()
-            await ensurePresetDomains()
+            var mapped = mapSheet(from: record)
+            if mapped.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                mapped.name = trimmed
+            }
+            registerPendingSheetPresence(recordName: mapped.id)
+            registerPendingSheetNameOverride(recordName: mapped.id, name: mapped.name)
+            upsertLocalSheet(mapped)
+            switchSheetInternal(to: mapped, seedDefaultsAfterReload: true)
+            syncLogger.info("Create sheet finished cohortId=\(mapped.cohortId, privacy: .public) recordName=\(mapped.id, privacy: .public)")
         } catch {
             lastErrorMessage = "Failed to create sheet: \(error.localizedDescription)"
+            syncLogger.error("Create sheet failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func renameSheet(sheet: CohortSheet, name: String) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
-        guard beginSheetMutation() else { return }
+        guard let mutationSequence = beginSheetMutation() else { return }
         defer { endSheetMutation() }
+
+        let previous = sheets.first(where: { $0.id == sheet.id }) ?? sheet
+        var optimistic = previous
+        optimistic.name = trimmed
+        registerPendingSheetNameOverride(recordName: optimistic.id, name: trimmed)
+        upsertLocalSheet(optimistic)
+        syncLogger.info(
+            "Rename sheet started recordName=\(sheet.id, privacy: .public) from=\(previous.name, privacy: .public) to=\(trimmed, privacy: .public)"
+        )
 
         do {
             let recordID = CKRecord.ID(recordName: sheet.id)
@@ -1680,36 +1731,49 @@ final class CloudKitStore: ObservableObject {
             if updated.cohortId.isEmpty {
                 updated.cohortId = sheet.cohortId
             }
-            sheets = sheets.map { $0.id == updated.id ? updated : $0 }
-            if activeSheet?.id == updated.id {
-                activeSheet = updated
-            }
-            sheets.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            registerPendingSheetNameOverride(recordName: updated.id, name: trimmed)
+            upsertLocalSheet(updated)
+            syncCoordinator?.noteLocalWrite()
+            await loadSheets(expectedMutationSequence: mutationSequence)
+            syncLogger.info("Rename sheet finished recordName=\(updated.id, privacy: .public) name=\(updated.name, privacy: .public)")
         } catch {
+            clearPendingSheetNameOverride(recordName: optimistic.id)
+            upsertLocalSheet(previous)
             lastErrorMessage = "Failed to rename sheet: \(error.localizedDescription)"
+            syncLogger.error("Rename sheet failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     func switchSheet(to sheet: CohortSheet) async {
         guard activeSheet?.id != sheet.id else { return }
-        guard beginSheetMutation() else { return }
+        guard let mutationSequence = beginSheetMutation() else { return }
         defer { endSheetMutation() }
-        await switchSheetInternal(to: sheet)
+
+        var target = sheet
+        if sheets.contains(where: { $0.id == sheet.id }) == false {
+            await loadSheets(expectedMutationSequence: mutationSequence)
+            guard let refreshed = sheets.first(where: { $0.id == sheet.id }) ?? sheets.first(where: { $0.cohortId == sheet.cohortId }) else {
+                lastErrorMessage = "That sheet is no longer available. Please refresh and try again."
+                return
+            }
+            target = refreshed
+        }
+
+        switchSheetInternal(to: target, seedDefaultsAfterReload: false)
     }
 
     func deleteSheet(sheet: CohortSheet) async {
-        guard beginSheetMutation() else { return }
+        guard let mutationSequence = beginSheetMutation() else { return }
         defer { endSheetMutation() }
 
         guard sheet.cohortId != defaultCohortId else {
             lastErrorMessage = "The main sheet cannot be deleted."
             return
         }
-        guard activeSheet?.id != sheet.id else {
-            lastErrorMessage = "Switch sheets before deleting this sheet."
-            return
-        }
         guard await requireWriteAccess() else { return }
+
+        let deletingActiveSheet = activeSheet?.id == sheet.id
+        syncLogger.info("Delete sheet started recordName=\(sheet.id, privacy: .public) cohortId=\(sheet.cohortId, privacy: .public)")
 
         isLoading = true
         resetProgress = ResetProgress(message: "Deleting sheet...", step: 0, totalSteps: 10)
@@ -1744,38 +1808,104 @@ final class CloudKitStore: ObservableObject {
 
             try? CloudKitStoreSnapshotCache.remove(cohortId: sheet.cohortId)
             UserDefaults.standard.removeObject(forKey: lastSyncDateDefaultsKey(for: sheet.cohortId))
+            clearPendingSheetPresence(recordName: sheet.id)
+            clearPendingSheetNameOverride(recordName: sheet.id)
 
-            if UserDefaults.standard.string(forKey: activeCohortDefaultsKey) == sheet.cohortId {
+            if deletingActiveSheet || UserDefaults.standard.string(forKey: activeCohortDefaultsKey) == sheet.cohortId {
                 UserDefaults.standard.set(defaultCohortId, forKey: activeCohortDefaultsKey)
             }
 
             sheets.removeAll { $0.id == sheet.id }
-            await loadSheets()
+            syncCoordinator?.noteLocalWrite()
+            await loadSheets(expectedMutationSequence: mutationSequence)
+
+            if deletingActiveSheet {
+                if let fallback = sheets.first(where: { $0.cohortId == defaultCohortId }) ?? sheets.first {
+                    switchSheetInternal(to: fallback, seedDefaultsAfterReload: false)
+                } else {
+                    activeSheetSwitchToken = nil
+                    sheetSwitchTask?.cancel()
+                    sheetSwitchTask = nil
+                    activeSheet = nil
+                }
+            }
+            syncLogger.info("Delete sheet finished recordName=\(sheet.id, privacy: .public)")
         } catch {
             lastErrorMessage = "Failed to delete sheet: \(error.localizedDescription)"
+            syncLogger.error("Delete sheet failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
-    private func switchSheetInternal(to sheet: CohortSheet) async {
+    private func switchSheetInternal(to sheet: CohortSheet, seedDefaultsAfterReload: Bool) {
         syncCoordinator?.stop()
         syncCoordinator = nil
+
+        let switchToken = UUID()
+        activeSheetSwitchToken = switchToken
+        sheetSwitchTask?.cancel()
 
         activeSheet = sheet
         UserDefaults.standard.set(sheet.cohortId, forKey: activeCohortDefaultsKey)
         cohortRecordID = nil
+        syncLogger.info("Switch sheet started cohortId=\(sheet.cohortId, privacy: .public) recordName=\(sheet.id, privacy: .public)")
+
+        sheetSwitchTask = Task { [weak self] in
+            guard let self else { return }
+            await self.performSheetSwitchReload(
+                to: sheet,
+                switchToken: switchToken,
+                seedDefaultsAfterReload: seedDefaultsAfterReload
+            )
+        }
+    }
+
+    private func performSheetSwitchReload(
+        to sheet: CohortSheet,
+        switchToken: UUID,
+        seedDefaultsAfterReload: Bool
+    ) async {
+        guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
         clearInMemoryDataForSheetSwitch()
         _ = restoreSnapshotIfAvailable()
         await reloadAllData(force: true)
+        guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
+
+        if seedDefaultsAfterReload {
+            await ensureLearningObjectivesSeededIfNeeded()
+            guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
+            await ensurePresetDomains()
+            guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
+            syncCoordinator?.noteLocalWrite()
+        }
+
+        await loadSheets()
+        guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
+        syncLogger.info("Switch sheet finished cohortId=\(sheet.cohortId, privacy: .public) recordName=\(sheet.id, privacy: .public)")
+
+        if activeSheetSwitchToken == switchToken {
+            activeSheetSwitchToken = nil
+            sheetSwitchTask = nil
+        }
     }
 
-    private func beginSheetMutation() -> Bool {
-        guard isSheetMutationInProgress == false else { return false }
-        isSheetMutationInProgress = true
+    private func shouldContinueSheetSwitch(token: UUID, cohortId: String) -> Bool {
+        guard Task.isCancelled == false else { return false }
+        guard activeSheetSwitchToken == token else { return false }
+        guard activeSheet?.cohortId == cohortId else { return false }
         return true
+    }
+
+    private func beginSheetMutation() -> UInt64? {
+        guard isSheetMutationInProgress == false else { return nil }
+        isSheetMutationInProgress = true
+        isSheetOperationInFlight = true
+        sheetMutationSequence &+= 1
+        return sheetMutationSequence
     }
 
     private func endSheetMutation() {
         isSheetMutationInProgress = false
+        isSheetOperationInFlight = false
     }
 
     private func ensureCohortRecord() async throws -> CKRecord {
@@ -1783,10 +1913,28 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func ensureCohortRecord(for cohortId: String, name: String? = nil) async throws -> CKRecord {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+
         if let cohortRecordID {
-            let record = try await service.fetchRecord(with: cohortRecordID)
-            if (record[Field.cohortId] as? String) == cohortId {
-                return record
+            do {
+                let record = try await service.fetchRecord(with: cohortRecordID)
+                if (record[Field.cohortId] as? String) == cohortId {
+                    return record
+                }
+            } catch {
+                syncLogger.debug("Unable to fetch cached cohort record id \(cohortRecordID.recordName, privacy: .public)")
+            }
+        }
+
+        let canonicalRecordID = CKRecord.ID(recordName: cohortId)
+        do {
+            let record = try await service.fetchRecord(with: canonicalRecordID)
+            return record
+        } catch {
+            if let ckError = error as? CKError, ckError.code == .unknownItem {
+                // Fall back to query path below.
+            } else {
+                throw error
             }
         }
 
@@ -1797,11 +1945,19 @@ final class CloudKitStore: ObservableObject {
             return existing
         }
 
-        let recordID = CKRecord.ID(recordName: cohortId)
-        let record = CKRecord(recordType: RecordType.cohort, recordID: recordID)
+        let record = CKRecord(recordType: RecordType.cohort, recordID: canonicalRecordID)
         record[Field.cohortId] = cohortId
-        record[Field.name] = name ?? "Main Cohort"
+        let initialName: String
+        if let trimmedName, trimmedName.isEmpty == false {
+            initialName = trimmedName
+        } else if cohortId == defaultCohortId {
+            initialName = "Main Cohort"
+        } else {
+            initialName = "Sheet"
+        }
+        record[Field.name] = initialName
         applyAuditFields(to: record, createdAt: Date())
+        syncLogger.info("Bootstrapping cohort record cohortId=\(cohortId, privacy: .public) name=\(initialName, privacy: .public)")
         return try await service.save(record: record)
     }
 
@@ -4000,6 +4156,197 @@ final class CloudKitStore: ObservableObject {
         let createdAt = record[Field.createdAt] as? Date ?? Date()
         let updatedAt = record[Field.updatedAt] as? Date ?? createdAt
         return CohortSheet(id: record.recordID.recordName, cohortId: cohortId, name: name, createdAt: createdAt, updatedAt: updatedAt)
+    }
+
+    private func makeUniqueSheetCohortID() -> String {
+        let reserved = Set(
+            sheets.flatMap { [$0.id.lowercased(), $0.cohortId.lowercased()] } + [defaultCohortId.lowercased()]
+        )
+        var candidate = UUID().uuidString.lowercased()
+        while reserved.contains(candidate) {
+            candidate = UUID().uuidString.lowercased()
+        }
+        return candidate
+    }
+
+    private func shouldApplySheetLoad(
+        requestID: UInt64,
+        expectedMutationSequence: UInt64?,
+        loadStartMutationSequence: UInt64,
+        wasMutatingAtStart: Bool
+    ) -> Bool {
+        if let expectedMutationSequence {
+            guard expectedMutationSequence == sheetMutationSequence else { return false }
+        } else {
+            guard isSheetMutationInProgress == false else { return false }
+            guard wasMutatingAtStart == false else { return false }
+            guard loadStartMutationSequence == sheetMutationSequence else { return false }
+        }
+        guard requestID >= latestAppliedSheetLoadRequest else { return false }
+        latestAppliedSheetLoadRequest = requestID
+        return true
+    }
+
+    private func applyLoadedSheets(_ incoming: [CohortSheet]) {
+        prunePendingSheetMutationHints()
+        let withOverrides = deduplicateSheets(incoming).map { applyPendingSheetNameOverride(to: $0, sourceIsRemote: false) }
+        sheets = sortedSheets(withOverrides)
+
+        guard let active = preferredActiveSheet(in: sheets) else {
+            activeSheet = nil
+            UserDefaults.standard.removeObject(forKey: activeCohortDefaultsKey)
+            return
+        }
+        activeSheet = active
+        UserDefaults.standard.set(active.cohortId, forKey: activeCohortDefaultsKey)
+    }
+
+    private func upsertLocalSheet(_ sheet: CohortSheet) {
+        var merged = sheets
+        let updated = applyPendingSheetNameOverride(to: sheet, sourceIsRemote: false)
+        if let index = merged.firstIndex(where: { $0.id == updated.id }) {
+            merged[index] = updated
+        } else {
+            merged.append(updated)
+        }
+        applyLoadedSheets(merged)
+    }
+
+    private func mergeFetchedSheets(_ fetched: [CohortSheet]) -> [CohortSheet] {
+        prunePendingSheetMutationHints()
+        var mergedByRecordName: [String: CohortSheet] = [:]
+
+        for sheet in fetched {
+            clearPendingSheetPresence(recordName: sheet.id)
+            let withOverride = applyPendingSheetNameOverride(to: sheet, sourceIsRemote: true)
+            mergedByRecordName[withOverride.id] = withOverride
+        }
+
+        for local in sheets {
+            guard mergedByRecordName[local.id] == nil else { continue }
+            guard pendingSheetPresenceByRecordName[local.id] != nil else { continue }
+            mergedByRecordName[local.id] = applyPendingSheetNameOverride(to: local, sourceIsRemote: false)
+        }
+
+        return sortedSheets(deduplicateSheets(Array(mergedByRecordName.values)))
+    }
+
+    private func deduplicateSheets(_ list: [CohortSheet]) -> [CohortSheet] {
+        var byCanonicalKey: [String: CohortSheet] = [:]
+        for candidate in list {
+            let key = canonicalSheetKey(for: candidate)
+            if let existing = byCanonicalKey[key] {
+                byCanonicalKey[key] = preferredSheet(existing, over: candidate)
+            } else {
+                byCanonicalKey[key] = candidate
+            }
+        }
+        return Array(byCanonicalKey.values)
+    }
+
+    private func preferredSheet(_ lhs: CohortSheet, over rhs: CohortSheet) -> CohortSheet {
+        let lhsScore = sheetPreferenceScore(lhs)
+        let rhsScore = sheetPreferenceScore(rhs)
+        if lhsScore != rhsScore {
+            return lhsScore > rhsScore ? lhs : rhs
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt ? lhs : rhs
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt ? lhs : rhs
+        }
+        return lhs.id < rhs.id ? lhs : rhs
+    }
+
+    private func sheetPreferenceScore(_ sheet: CohortSheet) -> Int {
+        var score = 0
+        if sheet.id.lowercased() == sheet.cohortId.lowercased() {
+            score += 4
+        }
+        if sheet.cohortId.lowercased() == defaultCohortId.lowercased() {
+            score += 3
+        }
+        if sheet.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            score += 1
+        }
+        return score
+    }
+
+    private func canonicalSheetKey(for sheet: CohortSheet) -> String {
+        let cohortID = sheet.cohortId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if cohortID.isEmpty {
+            return "record:\(sheet.id.lowercased())"
+        }
+        return "cohort:\(cohortID)"
+    }
+
+    private func sortedSheets(_ list: [CohortSheet]) -> [CohortSheet] {
+        list.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder != .orderedSame {
+                return nameOrder == .orderedAscending
+            }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private func preferredActiveSheet(in list: [CohortSheet]) -> CohortSheet? {
+        guard list.isEmpty == false else { return nil }
+        let normalizedDefault = defaultCohortId.lowercased()
+        let preferredCohortId = (
+            UserDefaults.standard.string(forKey: activeCohortDefaultsKey)
+            ?? activeSheet?.cohortId
+            ?? defaultCohortId
+        ).lowercased()
+
+        return list.first(where: { $0.cohortId.lowercased() == preferredCohortId })
+            ?? list.first(where: { $0.cohortId.lowercased() == normalizedDefault })
+            ?? list.first
+    }
+
+    private func registerPendingSheetPresence(recordName: String) {
+        pendingSheetPresenceByRecordName[recordName] = Date()
+    }
+
+    private func clearPendingSheetPresence(recordName: String) {
+        pendingSheetPresenceByRecordName.removeValue(forKey: recordName)
+    }
+
+    private func registerPendingSheetNameOverride(recordName: String, name: String) {
+        pendingSheetNameOverridesByRecordName[recordName] = PendingSheetNameOverride(name: name, recordedAt: Date())
+    }
+
+    private func clearPendingSheetNameOverride(recordName: String) {
+        pendingSheetNameOverridesByRecordName.removeValue(forKey: recordName)
+    }
+
+    private func applyPendingSheetNameOverride(to sheet: CohortSheet, sourceIsRemote: Bool) -> CohortSheet {
+        guard let override = pendingSheetNameOverridesByRecordName[sheet.id] else { return sheet }
+        guard Date().timeIntervalSince(override.recordedAt) <= pendingSheetMutationGraceInterval else {
+            pendingSheetNameOverridesByRecordName.removeValue(forKey: sheet.id)
+            return sheet
+        }
+        if sourceIsRemote, sheet.name.localizedCaseInsensitiveCompare(override.name) == .orderedSame {
+            pendingSheetNameOverridesByRecordName.removeValue(forKey: sheet.id)
+            return sheet
+        }
+        var updated = sheet
+        updated.name = override.name
+        return updated
+    }
+
+    private func prunePendingSheetMutationHints() {
+        let now = Date()
+        pendingSheetPresenceByRecordName = pendingSheetPresenceByRecordName.filter { _, timestamp in
+            now.timeIntervalSince(timestamp) <= pendingSheetMutationGraceInterval
+        }
+        pendingSheetNameOverridesByRecordName = pendingSheetNameOverridesByRecordName.filter { _, override in
+            now.timeIntervalSince(override.recordedAt) <= pendingSheetMutationGraceInterval
+        }
     }
 
     private func deduplicatedProgress(_ records: [ObjectiveProgress]) -> [ObjectiveProgress] {
