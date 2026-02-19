@@ -228,38 +228,45 @@ struct StudentOverviewBoard: View {
     }
 
     private var header: some View {
-        HStack(spacing: zoomManager.scaled(12)) {
-            VStack(alignment: .leading, spacing: zoomManager.scaled(2)) {
+        HStack(spacing: zoomManager.scaled(10)) {
+            VStack(alignment: .leading, spacing: zoomManager.scaled(4)) {
                 Text("Students")
                     .font(.title2)
                     .fontWeight(.bold)
 
                 Text(students.isEmpty ? "No students yet" : "\(students.count) student\(students.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
 
                 if let activeSheet = store.activeSheet {
                     Text("Sheet: \(activeSheet.name)")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .font(.headline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: zoomManager.scaled(8))
 
-            Button {
-                showingManageSheets = true
-            } label: {
-                Label("Manage Sheets", systemImage: "square.stack.3d.up")
+            HStack(spacing: zoomManager.scaled(8)) {
+                Button {
+                    showingManageSheets = true
+                } label: {
+                    Label("Manage Sheets", systemImage: "square.stack.3d.up")
+                }
+                .frame(minHeight: zoomManager.scaled(32), maxHeight: zoomManager.scaled(32))
+                .lineLimit(1)
+
+                Button {
+                    showingManageStudents = true
+                } label: {
+                    Label("Manage Students", systemImage: "person.2.badge.gearshape")
+                }
+                .frame(minHeight: zoomManager.scaled(32), maxHeight: zoomManager.scaled(32))
+                .lineLimit(1)
             }
             .buttonStyle(.bordered)
-
-            Button {
-                showingManageStudents = true
-            } label: {
-                Label("Manage Students", systemImage: "person.2.badge.gearshape")
-            }
-            .buttonStyle(.borderedProminent)
         }
     }
 
