@@ -57,10 +57,19 @@ struct ContentView: View {
         return (title: message, subtitle: nil)
     }
 
+    private var sidebarMinWidth: CGFloat { zoomManager.scaled(320) }
+    private var sidebarIdealWidth: CGFloat { zoomManager.scaled(360) }
+    private var sidebarMaxWidth: CGFloat { zoomManager.scaled(520) }
+
     var body: some View {
         NavigationSplitView {
             StudentOverviewBoard(selectedStudentId: selectedStudentIdBinding)
                 .navigationTitle("Students")
+                .navigationSplitViewColumnWidth(
+                    min: sidebarMinWidth,
+                    ideal: sidebarIdealWidth,
+                    max: sidebarMaxWidth
+                )
         } detail: {
             SwiftUI.Group {
                 if students.isEmpty {
