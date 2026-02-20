@@ -249,7 +249,7 @@ struct StudentOverviewBoard: View {
 
             Spacer(minLength: zoomManager.scaled(8))
 
-            HStack(spacing: zoomManager.scaled(8)) {
+            VStack(alignment: .trailing, spacing: zoomManager.scaled(8)) {
                 Button {
                     showingManageSheets = true
                 } label: {
@@ -381,6 +381,7 @@ struct StudentOverviewBoard: View {
 
     private var cohortOverviewRow: some View {
         Button {
+            store.selectedScope = .overall
             selectedStudentId = nil
         } label: {
             HStack(spacing: zoomManager.scaled(12)) {

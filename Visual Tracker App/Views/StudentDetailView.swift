@@ -92,7 +92,7 @@ struct StudentDetailView: View {
     }
 
     private var boardStudents: [Student] {
-        filteredStudents
+        return filteredStudents
     }
 
     private var breakdownStudents: [Student] {
@@ -383,9 +383,27 @@ struct StudentDetailView: View {
             }
         }
         .onChange(of: selectedScope) { _, newScope in
+#if DEBUG
+            defer { logSelectionInvariants(context: "scope changed") }
+#endif
+            if case .overall = newScope, selectedStudent != nil {
+#if DEBUG
+                debugPrint("[SelectionState] Clearing selected student because Overview scope was selected.")
+#endif
+                self.selectedStudent = nil
+            }
+
             guard let selectedStudent else { return }
             guard isStudent(selectedStudent, in: newScope) == false else { return }
             self.selectedStudent = nil
+#if DEBUG
+            debugPrint("[SelectionState] Cleared selected student because it no longer matches the active scope.")
+#endif
+        }
+        .onChange(of: selectedStudent?.id) { _, _ in
+#if DEBUG
+            logSelectionInvariants(context: "selected student changed")
+#endif
         }
     }
 
@@ -1042,26 +1060,23 @@ struct StudentDetailView: View {
     private func resetData() {
         Task {
             await store.resetLearningObjectivesToDefaultTemplate()
+            store.selectedScope = .overall
             store.selectedStudentId = nil
             selectedGroup = nil
         }
     }
 
     private func beginScopeSwitch(to newFilter: StudentFilterScope, group: CohortGroup? = nil) {
-        let shouldKeepSelection: Bool
-        if let selectedStudent {
-            shouldKeepSelection = isStudent(selectedStudent, in: newFilter)
-        } else {
-            shouldKeepSelection = false
-        }
-
         withAnimation(.easeInOut(duration: 0.15)) {
             store.selectedScope = newFilter
+            store.selectedStudentId = nil
             selectedGroup = group
-            if shouldKeepSelection == false {
-                selectedStudent = nil
-            }
+            selectedStudent = nil
         }
+
+#if DEBUG
+        logSelectionInvariants(context: "scope switch")
+#endif
     }
 
     private func addStudent(
@@ -1182,6 +1197,23 @@ struct StudentDetailView: View {
         }
         return canonical.isEmpty ? objective.code : objective.title
     }
+
+#if DEBUG
+    private func logSelectionInvariants(context: String) {
+        if case .overall = selectedScope, selectedStudent != nil {
+            debugPrint("[SelectionState] \(context): overview scope still has a selected student.")
+        }
+
+        if case .overall = selectedScope {
+            let showingStudentDetail = isStudentDetailMode
+            if selectedStudent != nil, showingStudentDetail == false {
+                debugPrint("[SelectionState] \(context): selected student exists in overview scope, but main view is not student detail.")
+            } else if selectedStudent == nil, showingStudentDetail {
+                debugPrint("[SelectionState] \(context): no selected student in overview scope, but main view is student detail.")
+            }
+        }
+    }
+#endif
 
     private enum DisplayMode {
         case overview
