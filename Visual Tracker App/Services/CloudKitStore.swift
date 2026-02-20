@@ -10,6 +10,12 @@ struct ResetProgress: Equatable {
     let totalSteps: Int
 }
 
+enum SheetLoadState: Equatable {
+    case idle
+    case switchingSheet
+    case loading
+}
+
 extension CloudKitStoreSnapshot.Group: Equatable {
     static func == (lhs: CloudKitStoreSnapshot.Group, rhs: CloudKitStoreSnapshot.Group) -> Bool {
         lhs.id == rhs.id
@@ -167,6 +173,7 @@ final class CloudKitStore: ObservableObject {
     @Published private(set) var activeSheet: CohortSheet?
     @Published private(set) var isSheetOperationInFlight: Bool = false
     @Published private(set) var isSheetMutationInProgress: Bool = false
+    @Published private(set) var sheetLoadState: SheetLoadState = .idle
 
     private let service: CloudKitService
     private let isPreviewData: Bool
@@ -176,10 +183,14 @@ final class CloudKitStore: ObservableObject {
     private var hasLoaded: Bool = false
     private var sheetLoadRequestSequence: UInt64 = 0
     private var latestAppliedSheetLoadRequest: UInt64 = 0
+    private var reloadRequestSequence: UInt64 = 0
+    private var latestAppliedReloadRequest: UInt64 = 0
     private var sheetMutationSequence: UInt64 = 0
     private var pendingSheetPresenceByRecordName: [String: Date] = [:]
     private var pendingSheetNameOverridesByRecordName: [String: PendingSheetNameOverride] = [:]
     private let pendingSheetMutationGraceInterval: TimeInterval = 30
+    private let defaultObjectiveRecordPrefix: String = "default-lo"
+    private let presetDomainRecordPrefix: String = "preset-domain"
 
     private var progressLoadedStudentIDs: Set<UUID> = []
     private var customPropertiesLoadedStudentIDs: Set<UUID> = []
@@ -460,6 +471,10 @@ final class CloudKitStore: ObservableObject {
         showLoadingUI: Bool,
         suppressErrorsWhenUsingSnapshot: Bool
     ) async {
+        reloadRequestSequence &+= 1
+        let reloadRequestID = reloadRequestSequence
+        let reloadCohortID = activeCohortId
+
         if isLoading {
             guard force else { return }
         }
@@ -551,6 +566,11 @@ final class CloudKitStore: ObservableObject {
                 progressRecords,
                 expertiseCheckScoreRecords
             )
+
+            guard shouldApplyReloadResult(requestID: reloadRequestID, cohortId: reloadCohortID) else {
+                syncLogger.debug("Skipping stale reload request \(reloadRequestID, privacy: .public) for cohort \(reloadCohortID, privacy: .public)")
+                return
+            }
 
             clearRecordTrackingStateForFullReload()
 
@@ -733,11 +753,20 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
-    func addDomain(name: String, colorHex: String?, recordUndo: Bool = true) async {
+    func addDomain(
+        name: String,
+        colorHex: String?,
+        recordUndo: Bool = true,
+        recordNameOverride: String? = nil
+    ) async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
         guard let cohortRecordID else {
             await reloadAllData()
+            return
+        }
+        let normalizedIncomingName = normalizedDomainName(name)
+        guard domains.contains(where: { normalizedDomainName($0.name) == normalizedIncomingName }) == false else {
             return
         }
 
@@ -746,7 +775,7 @@ final class CloudKitStore: ObservableObject {
         domains.sort { $0.name < $1.name }
         pendingDomainCreateIDs.insert(domain.id)
 
-        let recordID = CKRecord.ID(recordName: domain.id.uuidString)
+        let recordID = CKRecord.ID(recordName: recordNameOverride ?? domain.id.uuidString)
         domainRecordNameByID[domain.id] = recordID.recordName
         unconfirmedDomainRecordNames.insert(recordID.recordName)
         markRecordRecentlyWritten(recordType: RecordType.domain, recordName: recordID.recordName)
@@ -786,14 +815,28 @@ final class CloudKitStore: ObservableObject {
     func ensurePresetDomains() async {
         lastErrorMessage = nil
         guard await requireWriteAccess() else { return }
+        guard let activeRecordID = cohortRecordID else { return }
+        let seedCohortID = activeCohortId
 
         let presets = ["Tech", "Design", "Domain Expert"]
         var existing = Set(domains.map { normalizedDomainName($0.name) })
 
         for preset in presets {
+            guard Task.isCancelled == false else { return }
+            guard seedCohortID == activeCohortId else { return }
+            guard activeRecordID.recordName == cohortRecordID?.recordName else { return }
             let normalized = normalizedDomainName(preset)
             guard existing.contains(normalized) == false else { continue }
-            await addDomain(name: preset, colorHex: nil, recordUndo: false)
+            let seededRecordName = seededDomainRecordName(
+                forNormalizedName: normalized,
+                cohortRecordName: activeRecordID.recordName
+            )
+            await addDomain(
+                name: preset,
+                colorHex: nil,
+                recordUndo: false,
+                recordNameOverride: seededRecordName
+            )
             existing.insert(normalized)
         }
     }
@@ -1864,10 +1907,25 @@ final class CloudKitStore: ObservableObject {
         switchToken: UUID,
         seedDefaultsAfterReload: Bool
     ) async {
+        isSheetOperationInFlight = true
+        sheetLoadState = .switchingSheet
+        defer {
+            if activeSheetSwitchToken == switchToken {
+                sheetLoadState = .idle
+                isSheetOperationInFlight = false
+            }
+        }
+
         guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
         clearInMemoryDataForSheetSwitch()
-        _ = restoreSnapshotIfAvailable()
-        await reloadAllData(force: true)
+        let restoredSnapshot = restoreSnapshotIfAvailable()
+        hasCachedSnapshotData = restoredSnapshot
+        isShowingStaleSnapshot = restoredSnapshot
+        isOfflineUsingSnapshot = false
+        syncLogger.info("Sheet switch snapshot restore cohortId=\(sheet.cohortId, privacy: .public) restored=\(restoredSnapshot, privacy: .public)")
+
+        sheetLoadState = .loading
+        await reloadAllData(force: true, showLoadingUI: false, suppressErrorsWhenUsingSnapshot: restoredSnapshot)
         guard shouldContinueSheetSwitch(token: switchToken, cohortId: sheet.cohortId) else { return }
 
         if seedDefaultsAfterReload {
@@ -1885,6 +1943,8 @@ final class CloudKitStore: ObservableObject {
         if activeSheetSwitchToken == switchToken {
             activeSheetSwitchToken = nil
             sheetSwitchTask = nil
+            sheetLoadState = .idle
+            isSheetOperationInFlight = false
         }
     }
 
@@ -2220,7 +2280,7 @@ final class CloudKitStore: ObservableObject {
             learningObjectiveRecordNameByID[uuid] = record.recordID.recordName
 
             objectiveByRecordName[record.recordID.recordName] = objective
-            objectiveByCode[objective.code] = objective
+            objectiveByCode[normalizedObjectiveCodeKey(objective.code)] = objective
         }
 
         for record in records {
@@ -2233,8 +2293,15 @@ final class CloudKitStore: ObservableObject {
                     }
                 } else if let parentUUID = UUID(uuidString: parentRef.recordID.recordName) {
                     objective.parentId = parentUUID
+                } else {
+#if DEBUG
+                    syncLogger.error(
+                        "Missing parentRef during mapLearningObjectives objectiveRecord=\(record.recordID.recordName, privacy: .public) parentRecord=\(parentRef.recordID.recordName, privacy: .public) cohort=\(self.activeCohortId, privacy: .public)"
+                    )
+#endif
                 }
-            } else if let parentCode = objective.parentCode, let parent = objectiveByCode[parentCode] {
+            } else if let parentCode = objective.parentCode,
+                      let parent = objectiveByCode[normalizedObjectiveCodeKey(parentCode)] {
                 objective.parentId = parent.id
             }
         }
@@ -2272,7 +2339,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func mapCategoryLabel(from record: CKRecord) -> CategoryLabel {
-        let code = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
+        let codeRaw = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
+        let code = normalizedObjectiveCode(codeRaw)
         let title = record[Field.title] as? String ?? code
         categoryLabelRecordNameByCode[code] = record.recordID.recordName
         return CategoryLabel(code: code, title: title)
@@ -2493,7 +2561,9 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func setLearningObjectives(_ objectives: [LearningObjective]) {
-        allLearningObjectives = deduplicateLearningObjectivesByCode(objectives).sorted {
+        let deduplicatedByRecordIdentity = deduplicateLearningObjectivesByRecordIdentity(objectives)
+        let canonicalizedObjectives = canonicalizeLearningObjectivesByCode(deduplicatedByRecordIdentity)
+        allLearningObjectives = canonicalizedObjectives.sorted {
             if $0.sortOrder != $1.sortOrder {
                 return $0.sortOrder < $1.sortOrder
             }
@@ -2512,6 +2582,9 @@ final class CloudKitStore: ObservableObject {
         } else {
             rebuildProgressCaches()
         }
+#if DEBUG
+        debugValidateLearningObjectiveGraph(context: "setLearningObjectives")
+#endif
     }
 
     private func defaultLearningObjectivesWithResolvedParents() -> [LearningObjective] {
@@ -3062,27 +3135,65 @@ final class CloudKitStore: ObservableObject {
     func ensureLearningObjectivesSeededIfNeeded() async {
         guard hasLoaded else { return }
         guard let cohortRecordID else { return }
+        let cohortID = activeCohortId
         guard isSeedingLearningObjectives == false else { return }
         isSeedingLearningObjectives = true
         defer { isSeedingLearningObjectives = false }
 
         do {
-            syncLogger.info("Checking if LearningObjective seeding is needed")
+            syncLogger.info("Checking if LearningObjective seeding is needed for cohortId=\(cohortID, privacy: .public)")
             let cohortRef = CKRecord.Reference(recordID: cohortRecordID, action: .none)
             let records = try await service.queryRecords(
                 ofType: RecordType.learningObjective,
                 predicate: NSPredicate(format: "cohortRef == %@", cohortRef)
             )
-            guard records.isEmpty else { return }
+            guard shouldContinueSeed(cohortID: cohortID, cohortRecordName: cohortRecordID.recordName) else { return }
 
+            let existingObjectives = mapLearningObjectives(from: records)
+            let existingByCode = Dictionary(grouping: existingObjectives) { normalizedObjectiveCodeKey($0.code) }
             let defaults = defaultLearningObjectivesWithResolvedParents()
-            if allLearningObjectives.isEmpty {
-                setLearningObjectives(defaults)
+            let missingDefaults = defaults.filter { defaultObjective in
+                let key = normalizedObjectiveCodeKey(defaultObjective.code)
+                return existingByCode[key]?.isEmpty ?? true
             }
 
-            syncLogger.info("Seeding default learning objectives because remote cohort has zero records")
-            try await seedLearningObjectives(defaults)
-            syncLogger.info("Default learning objective seed complete: \(defaults.count, privacy: .public) records")
+            guard missingDefaults.isEmpty == false else {
+                await ensureDefaultCategoryLabelsIfNeeded(
+                    defaults: defaults,
+                    cohortRecordID: cohortRecordID,
+                    cohortID: cohortID
+                )
+                return
+            }
+
+            if allLearningObjectives.isEmpty {
+                setLearningObjectives(existingObjectives)
+            }
+
+            let orderedMissing = orderedLearningObjectivesForSeed(missingDefaults)
+            syncLogger.info(
+                "Seeding missing default LearningObjectives cohortId=\(cohortID, privacy: .public) count=\(orderedMissing.count, privacy: .public)"
+            )
+            var workingObjectives = deduplicateLearningObjectivesByCode(existingObjectives)
+            for objective in orderedMissing {
+                guard shouldContinueSeed(cohortID: cohortID, cohortRecordName: cohortRecordID.recordName) else { return }
+                let recordName = defaultLearningObjectiveRecordName(
+                    forCode: objective.code,
+                    cohortRecordName: cohortRecordID.recordName
+                )
+                learningObjectiveRecordNameByID[objective.id] = recordName
+                try await saveLearningObjectiveRecord(objective, allObjectives: workingObjectives + orderedMissing)
+                workingObjectives.append(objective)
+            }
+            setLearningObjectives(workingObjectives)
+            await ensureDefaultCategoryLabelsIfNeeded(
+                defaults: defaults,
+                cohortRecordID: cohortRecordID,
+                cohortID: cohortID
+            )
+            syncLogger.info(
+                "Default learning objective seed complete cohortId=\(cohortID, privacy: .public) inserted=\(orderedMissing.count, privacy: .public)"
+            )
         } catch {
             syncLogger.error("Learning objective seed failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -3998,10 +4109,90 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func seededRecordToken(for value: String) -> String {
+        let key = value.lowercased()
+        let scalars = key.unicodeScalars.map { scalar -> String in
+            if CharacterSet.alphanumerics.contains(scalar) {
+                return String(scalar)
+            }
+            return "_"
+        }
+        return scalars.joined()
+    }
+
+    private func defaultLearningObjectiveRecordName(forCode code: String, cohortRecordName: String) -> String {
+        "\(cohortRecordName)::\(defaultObjectiveRecordPrefix)::\(seededRecordToken(for: code))"
+    }
+
+    private func seededDomainRecordName(forNormalizedName name: String, cohortRecordName: String) -> String {
+        "\(cohortRecordName)::\(presetDomainRecordPrefix)::\(seededRecordToken(for: name))"
+    }
+
+    private func shouldContinueSeed(cohortID: String, cohortRecordName: String) -> Bool {
+        guard Task.isCancelled == false else { return false }
+        guard cohortID == activeCohortId else { return false }
+        guard cohortRecordName == cohortRecordID?.recordName else { return false }
+        return true
+    }
+
+    private func ensureDefaultCategoryLabelsIfNeeded(
+        defaults: [LearningObjective],
+        cohortRecordID: CKRecord.ID,
+        cohortID: String
+    ) async {
+        let rootDefaults = defaults.filter(\.isRootCategory)
+        for root in rootDefaults {
+            guard shouldContinueSeed(cohortID: cohortID, cohortRecordName: cohortRecordID.recordName) else { return }
+            let normalizedCode = normalizedObjectiveCode(root.code)
+            guard normalizedCode.isEmpty == false else { continue }
+            if categoryLabels.contains(where: { normalizedObjectiveCodeKey($0.key) == normalizedObjectiveCodeKey(normalizedCode) }) {
+                continue
+            }
+
+            let label = CategoryLabel(code: normalizedCode, title: root.title)
+            categoryLabels.append(label)
+            categoryLabels.sort { $0.key < $1.key }
+            pendingCategoryLabelCreateKeys.insert(normalizedCode)
+
+            let recordID = CKRecord.ID(recordName: "\(cohortRecordID.recordName)::\(normalizedCode)")
+            unconfirmedCategoryLabelRecordNames.insert(recordID.recordName)
+            markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordID.recordName)
+
+            let record = CKRecord(recordType: RecordType.categoryLabel, recordID: recordID)
+            record[Field.cohortRef] = CKRecord.Reference(recordID: cohortRecordID, action: .none)
+            record[Field.key] = normalizedCode
+            record[Field.code] = normalizedCode
+            record[Field.title] = root.title
+            applyAuditFields(to: record, createdAt: Date())
+
+            do {
+                let saved = try await service.save(record: record)
+                categoryLabelRecordNameByCode[normalizedCode] = saved.recordID.recordName
+                pendingCategoryLabelCreateKeys.remove(normalizedCode)
+                unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
+                unconfirmedCategoryLabelRecordNames.insert(saved.recordID.recordName)
+                markRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: saved.recordID.recordName)
+            } catch {
+                pendingCategoryLabelCreateKeys.remove(normalizedCode)
+                unconfirmedCategoryLabelRecordNames.remove(recordID.recordName)
+                syncLogger.error(
+                    "Failed default category label seed code=\(normalizedCode, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
     private func seedLearningObjectives(_ objectives: [LearningObjective]) async throws {
         let orderedObjectives = orderedLearningObjectivesForSeed(objectives)
         for objective in orderedObjectives {
             objective.isArchived = false
+            if let cohortRecordName = cohortRecordID?.recordName,
+               learningObjectiveRecordNameByID[objective.id] == nil {
+                learningObjectiveRecordNameByID[objective.id] = defaultLearningObjectiveRecordName(
+                    forCode: objective.code,
+                    cohortRecordName: cohortRecordName
+                )
+            }
             try await saveLearningObjectiveRecord(objective, allObjectives: objectives)
         }
         setLearningObjectives(objectives)
@@ -4064,6 +4255,7 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func clearInMemoryDataForSheetSwitch() {
+        syncLogger.info("Clearing in-memory state for sheet switch cohortId=\(self.activeCohortId, privacy: .public)")
         clearLocalObjectiveProgressState()
         clearLocalCustomPropertyState()
         clearLocalMembershipState()
@@ -4076,6 +4268,9 @@ final class CloudKitStore: ObservableObject {
         selectedStudentId = nil
         lastErrorMessage = nil
         lastSyncDate = .distantPast
+        hasCachedSnapshotData = false
+        isShowingStaleSnapshot = false
+        isOfflineUsingSnapshot = false
     }
 
     private func clearLocalDomainState() {
@@ -4129,6 +4324,7 @@ final class CloudKitStore: ObservableObject {
         groupRecordNameByID.removeAll()
         domainRecordNameByID.removeAll()
         learningObjectiveRecordNameByID.removeAll()
+        categoryLabelRecordNameByCode.removeAll()
         studentRecordNameByID.removeAll()
         membershipRecordNameByID.removeAll()
         progressRecordNameByID.removeAll()
@@ -4184,6 +4380,14 @@ final class CloudKitStore: ObservableObject {
         }
         guard requestID >= latestAppliedSheetLoadRequest else { return false }
         latestAppliedSheetLoadRequest = requestID
+        return true
+    }
+
+    private func shouldApplyReloadResult(requestID: UInt64, cohortId: String) -> Bool {
+        guard Task.isCancelled == false else { return false }
+        guard cohortId == activeCohortId else { return false }
+        guard requestID >= latestAppliedReloadRequest else { return false }
+        latestAppliedReloadRequest = requestID
         return true
     }
 
@@ -4481,8 +4685,9 @@ final class CloudKitStore: ObservableObject {
         }
 
         let restoredLabels = snapshot.categoryLabels.map { cached in
-            CategoryLabel(code: cached.code, title: cached.title)
-        }.sorted { $0.key < $1.key }
+            categoryLabelRecordNameByCode[cached.code] = cached.recordName
+            return CategoryLabel(code: cached.code, title: cached.title)
+        }.sorted(by: { (lhs: CategoryLabel, rhs: CategoryLabel) in lhs.key < rhs.key })
 
         groups = restoredGroups
         domains = restoredDomains
@@ -4529,7 +4734,7 @@ final class CloudKitStore: ObservableObject {
             CloudKitStoreSnapshot.CategoryLabel(
                 code: label.code,
                 title: label.title,
-                recordName: label.key
+                recordName: categoryLabelRecordNameByCode[label.key] ?? label.key
             )
         }
         let snapshotObjectives = allLearningObjectives.map { objective in
@@ -4678,12 +4883,19 @@ final class CloudKitStore: ObservableObject {
                 continue
             }
             if let parentCode = objective.parentCode,
-               let parent = objectiveByCode[parentCode] {
+               let parent = objectiveByCode[normalizedObjectiveCodeKey(parentCode)] {
                 childrenByParent[parent.id, default: []].append(objective)
                 continue
             }
             if objective.isRootCategory {
                 roots.append(objective)
+            } else {
+#if DEBUG
+                let objectiveRecordName = learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+                syncLogger.error(
+                    "Missing parent in objective cache build objectiveRecord=\(objectiveRecordName, privacy: .public) code=\(objective.code, privacy: .public) parentCode=\(objective.parentCode ?? "nil", privacy: .public) cohort=\(self.activeCohortId, privacy: .public)"
+                )
+#endif
             }
         }
 
@@ -4747,6 +4959,144 @@ final class CloudKitStore: ObservableObject {
         }
         return Array(byCode.values)
     }
+
+    private func deduplicateLearningObjectivesByRecordIdentity(_ objectives: [LearningObjective]) -> [LearningObjective] {
+        var byRecordIdentity: [String: LearningObjective] = [:]
+        var duplicateRecordIdentities: Set<String> = []
+
+        for objective in objectives {
+            objective.code = normalizedObjectiveCode(objective.code)
+            let identity: String
+            if let recordName = learningObjectiveRecordNameByID[objective.id] {
+                identity = "record:\(recordName)"
+            } else {
+                identity = "id:\(objective.id.uuidString)"
+            }
+
+            if let existing = byRecordIdentity[identity] {
+                duplicateRecordIdentities.insert(identity)
+                if shouldPreferObjective(objective, over: existing) {
+                    byRecordIdentity[identity] = objective
+                }
+            } else {
+                byRecordIdentity[identity] = objective
+            }
+        }
+
+        if duplicateRecordIdentities.isEmpty == false {
+            syncLogger.error("Detected duplicate LearningObjective record identities: \(duplicateRecordIdentities.sorted().joined(separator: ", "), privacy: .public)")
+        }
+
+        return Array(byRecordIdentity.values)
+    }
+
+    private func canonicalizeLearningObjectivesByCode(_ objectives: [LearningObjective]) -> [LearningObjective] {
+        var canonicalByCode: [String: LearningObjective] = [:]
+        var duplicateCodeKeys: Set<String> = []
+        var canonicalIDByObjectiveID: [UUID: UUID] = [:]
+
+        for objective in objectives {
+            objective.code = normalizedObjectiveCode(objective.code)
+            let codeKey = normalizedObjectiveCodeKey(objective.code)
+            guard codeKey.isEmpty == false else { continue }
+            if let existing = canonicalByCode[codeKey] {
+                duplicateCodeKeys.insert(codeKey)
+                if shouldPreferObjective(objective, over: existing) {
+                    canonicalByCode[codeKey] = objective
+                    canonicalIDByObjectiveID[existing.id] = objective.id
+                    canonicalIDByObjectiveID[objective.id] = objective.id
+                } else {
+                    canonicalIDByObjectiveID[objective.id] = existing.id
+                }
+            } else {
+                canonicalByCode[codeKey] = objective
+                canonicalIDByObjectiveID[objective.id] = objective.id
+            }
+        }
+
+        func resolveCanonicalID(for id: UUID) -> UUID {
+            var current = id
+            var seen: Set<UUID> = []
+            while let next = canonicalIDByObjectiveID[current], next != current, seen.contains(next) == false {
+                seen.insert(current)
+                current = next
+            }
+            return current
+        }
+
+        let canonicalByID = Dictionary(uniqueKeysWithValues: canonicalByCode.values.map { ($0.id, $0) })
+        for objective in canonicalByCode.values {
+            if let parentID = objective.parentId {
+                let resolvedParentID = resolveCanonicalID(for: parentID)
+                if resolvedParentID == objective.id {
+                    objective.parentId = nil
+                    objective.parentCode = nil
+                } else if let parent = canonicalByID[resolvedParentID] {
+                    objective.parentId = parent.id
+                    objective.parentCode = parent.code
+                } else {
+                    objective.parentId = nil
+                }
+            }
+            if let parentCode = objective.parentCode {
+                let normalizedParentCode = normalizedObjectiveCode(parentCode)
+                objective.parentCode = normalizedParentCode.isEmpty ? nil : normalizedParentCode
+                if objective.parentId == nil,
+                   let parent = canonicalByCode[normalizedObjectiveCodeKey(normalizedParentCode)],
+                   parent.id != objective.id {
+                    objective.parentId = parent.id
+                }
+            }
+        }
+
+        if duplicateCodeKeys.isEmpty == false {
+            syncLogger.error(
+                "Detected duplicate LearningObjective code(s): \(duplicateCodeKeys.sorted().joined(separator: ", "), privacy: .public). Collapsing to canonical records."
+            )
+        }
+        return Array(canonicalByCode.values)
+    }
+
+#if DEBUG
+    private func debugValidateLearningObjectiveGraph(context: StaticString) {
+        var recordNameCounts: [String: Int] = [:]
+        for objective in allLearningObjectives {
+            let recordName = learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+            recordNameCounts[recordName, default: 0] += 1
+        }
+        let duplicateRecordNames = Set(recordNameCounts.filter { $0.value > 1 }.map(\.key))
+        if duplicateRecordNames.isEmpty == false {
+            syncLogger.error(
+                "Duplicate LearningObjective record names detected context=\(String(describing: context), privacy: .public) cohort=\(self.activeCohortId, privacy: .public) recordNames=\(duplicateRecordNames.sorted().joined(separator: ","), privacy: .public)"
+            )
+            assertionFailure("Duplicate LearningObjective record names detected")
+        }
+
+        let objectiveByID = Dictionary(uniqueKeysWithValues: allLearningObjectives.map { ($0.id, $0) })
+        let objectiveByCode = objectiveDictionaryByCode(allLearningObjectives)
+        let orphaned = allLearningObjectives.filter { objective in
+            if objective.isRootCategory { return false }
+            if let parentID = objective.parentId, objectiveByID[parentID] != nil {
+                return false
+            }
+            if let parentCode = objective.parentCode,
+               objectiveByCode[normalizedObjectiveCodeKey(parentCode)] != nil {
+                return false
+            }
+            return true
+        }
+        if orphaned.isEmpty == false {
+            let details = orphaned.map { objective in
+                let recordName = learningObjectiveRecordNameByID[objective.id] ?? objective.id.uuidString
+                return "\(recordName)|\(objective.code)|\(objective.parentCode ?? "nil")"
+            }
+            syncLogger.error(
+                "Orphaned LearningObjectives context=\(String(describing: context), privacy: .public) cohort=\(self.activeCohortId, privacy: .public) details=\(details.joined(separator: ","), privacy: .public)"
+            )
+            assertionFailure("Orphaned LearningObjectives detected")
+        }
+    }
+#endif
 
     private func objectiveDictionaryByCode(_ objectives: [LearningObjective]) -> [String: LearningObjective] {
         var map: [String: LearningObjective] = [:]
@@ -5290,11 +5640,11 @@ final class CloudKitStore: ObservableObject {
             }
 
             let remoteLabelIDs = Set(remoteLabels.map { $0.recordID.recordName })
-            let localLabelIDs = Set(categoryLabels.map { $0.key })
-            for key in localLabelIDs.subtracting(remoteLabelIDs) {
-                guard isRecentlyWritten(recordType: RecordType.categoryLabel, recordName: key) == false else { continue }
-                guard unconfirmedCategoryLabelRecordNames.contains(key) == false else { continue }
-                deleteCategoryLabelByRecordID(CKRecord.ID(recordName: key))
+            let localLabelRecordNames = Set(categoryLabelRecordNameByCode.values)
+            for recordName in localLabelRecordNames.subtracting(remoteLabelIDs) {
+                guard isRecentlyWritten(recordType: RecordType.categoryLabel, recordName: recordName) == false else { continue }
+                guard unconfirmedCategoryLabelRecordNames.contains(recordName) == false else { continue }
+                deleteCategoryLabelByRecordID(CKRecord.ID(recordName: recordName))
             }
 
             let remoteExpertiseCheckScoreIDs = Set(remoteExpertiseCheckScores.map { $0.recordID.recordName })
@@ -5396,6 +5746,10 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyRemoteUpsert(recordType: String, record: CKRecord) {
+        guard recordBelongsToActiveCohort(record) else {
+            syncLogger.debug("Ignoring remote upsert for record outside active cohort type=\(recordType, privacy: .public) record=\(record.recordID.recordName, privacy: .public)")
+            return
+        }
         isApplyingRemoteChanges = true
         defer { isApplyingRemoteChanges = false }
         switch recordType {
@@ -5422,13 +5776,46 @@ final class CloudKitStore: ObservableObject {
         }
     }
 
+    private func recordsForActiveCohort(_ records: [CKRecord], context: StaticString) -> [CKRecord] {
+        let filtered = records.filter { recordBelongsToActiveCohort($0) }
+#if DEBUG
+        if filtered.count != records.count {
+            let droppedRecordNames = records
+                .filter { recordBelongsToActiveCohort($0) == false }
+                .map(\.recordID.recordName)
+                .joined(separator: ",")
+            syncLogger.error(
+                "Filtered cross-cohort records context=\(String(describing: context), privacy: .public) cohort=\(self.activeCohortId, privacy: .public) dropped=\(droppedRecordNames, privacy: .public)"
+            )
+            assertionFailure("Cross-cohort record(s) detected in \(context)")
+        }
+#endif
+        return filtered
+    }
+
+    private func recordBelongsToActiveCohort(_ record: CKRecord) -> Bool {
+        let activeRecordName = cohortRecordID?.recordName ?? activeSheet?.id
+        guard let activeRecordName else { return false }
+        guard let cohortRef = record[Field.cohortRef] as? CKRecord.Reference else {
+#if DEBUG
+            syncLogger.error(
+                "Record missing cohortRef type=\(record.recordType, privacy: .public) record=\(record.recordID.recordName, privacy: .public)"
+            )
+            assertionFailure("Record missing cohortRef")
+#endif
+            return false
+        }
+        return cohortRef.recordID.recordName == activeRecordName
+    }
+
     private func applyGroupChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyGroupChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
 
-        for record in records {
+        for record in filteredRecords {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
             let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: groupRecordNameByID)
@@ -5455,12 +5842,13 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyDomainChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyDomainChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
 
-        for record in records {
+        for record in filteredRecords {
             let name = record[Field.name] as? String ?? "Untitled"
             let colorHex = record[Field.colorHex] as? String
             let overallModeRaw = (record[Field.overallMode] as? String) ?? ExpertiseCheckOverallMode.computed.rawValue
@@ -5488,13 +5876,15 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyCategoryLabelChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyCategoryLabelChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
 
-        for record in records {
-            let code = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
+        for record in filteredRecords {
+            let codeRaw = record[Field.code] as? String ?? (record[Field.key] as? String ?? record.recordID.recordName)
+            let code = normalizedObjectiveCode(codeRaw)
             let title = record[Field.title] as? String ?? code
 
             if let existing = categoryLabels.first(where: { $0.key == code }) {
@@ -5504,6 +5894,7 @@ final class CloudKitStore: ObservableObject {
                 syncLogger.info("Adding new category label: \(code, privacy: .public)")
                 categoryLabels.append(CategoryLabel(code: code, title: title))
             }
+            categoryLabelRecordNameByCode[code] = record.recordID.recordName
             pendingCategoryLabelCreateKeys.remove(code)
             unconfirmedCategoryLabelRecordNames.remove(record.recordID.recordName)
             unmarkRecordRecentlyWritten(recordType: RecordType.categoryLabel, recordName: record.recordID.recordName)
@@ -5513,7 +5904,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyLearningObjectiveChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyLearningObjectiveChanges")
+        guard filteredRecords.isEmpty == false else { return }
         objectWillChange.send()
 
         var mergedByRecordName: [String: CKRecord] = [:]
@@ -5530,7 +5922,7 @@ final class CloudKitStore: ObservableObject {
             record[Field.isArchived] = objective.isArchived ? 1 : 0
             mergedByRecordName[recordName] = record
         }
-        for record in records {
+        for record in filteredRecords {
             mergedByRecordName[record.recordID.recordName] = record
             let objectiveID = resolvedStableID(
                 forRecordName: record.recordID.recordName,
@@ -5546,13 +5938,14 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyMembershipChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyMembershipChanges")
+        guard filteredRecords.isEmpty == false else { return }
         objectWillChange.send()
 
         let studentMap = dictionaryByRecordName(items: students, recordNameLookup: studentRecordNameByID)
         let groupMap = dictionaryByRecordName(items: groups, recordNameLookup: groupRecordNameByID)
 
-        for record in records {
+        for record in filteredRecords {
             if let mapped = mapMembership(from: record, studentMap: studentMap, groupMap: groupMap) {
                 memberships.removeAll { $0.id == mapped.id }
                 memberships.append(mapped)
@@ -5566,7 +5959,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyStudentChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyStudentChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         let groupByRecordName: [String: CohortGroup] = {
             var map: [String: CohortGroup] = [:]
@@ -5589,7 +5983,7 @@ final class CloudKitStore: ObservableObject {
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
 
-        for record in records {
+        for record in filteredRecords {
             let uuid = resolvedStableID(forRecordName: record.recordID.recordName, lookup: studentRecordNameByID)
 
             let name = record[Field.name] as? String ?? "Unnamed"
@@ -5629,7 +6023,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyProgressChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyProgressChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
@@ -5643,7 +6038,7 @@ final class CloudKitStore: ObservableObject {
         }()
 
         var recordsByStudentID: [UUID: [CKRecord]] = [:]
-        for record in records {
+        for record in filteredRecords {
             guard let studentRef = studentReference(from: record) else { continue }
             guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
             recordsByStudentID[studentID, default: []].append(record)
@@ -5726,7 +6121,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyCustomPropertyChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyCustomPropertyChanges")
+        guard filteredRecords.isEmpty == false else { return }
 
         // Notify SwiftUI that changes are coming
         objectWillChange.send()
@@ -5739,7 +6135,7 @@ final class CloudKitStore: ObservableObject {
             return map
         }()
 
-        for record in records {
+        for record in filteredRecords {
             guard let studentRef = studentReference(from: record) else { continue }
             guard let studentID = studentIDByRecordName[studentRef.recordID.recordName] else { continue }
             guard let student = students.first(where: { $0.id == studentID }) else { continue }
@@ -5777,7 +6173,8 @@ final class CloudKitStore: ObservableObject {
     }
 
     private func applyExpertiseCheckObjectiveScoreChanges(_ records: [CKRecord]) {
-        guard records.isEmpty == false else { return }
+        let filteredRecords = recordsForActiveCohort(records, context: "applyExpertiseCheckObjectiveScoreChanges")
+        guard filteredRecords.isEmpty == false else { return }
         objectWillChange.send()
 
         var merged: [ExpertiseCheckObjectiveScore] = expertiseCheckObjectiveScores
@@ -5786,7 +6183,7 @@ final class CloudKitStore: ObservableObject {
             mergedByID[score.id] = index
         }
 
-        for record in records {
+        for record in filteredRecords {
             guard let incoming = mapExpertiseCheckObjectiveScore(from: record) else { continue }
             if let index = mergedByID[incoming.id] {
                 let existing = merged[index]
