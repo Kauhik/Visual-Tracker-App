@@ -134,7 +134,7 @@ flowchart TD
 
 ### Entity Relationship Diagram
 
-![Visual Tracker ERD](architecture/visual-tracker-erd.png)
+Add your ERD image here when ready.
 
 ### Sync / Migration Tactics Diagram
 
