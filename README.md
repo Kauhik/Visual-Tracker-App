@@ -12,7 +12,6 @@ Visual Tracker App is a macOS mentor dashboard for tracking student progress acr
 - [What It Does](#what-it-does)
 - [Feature Set](#feature-set)
 - [Architecture](#architecture)
-- [Diagrams](#diagrams)
 - [Requirements](#requirements)
 - [CloudKit Setup (First-Time)](#cloudkit-setup-first-time)
 - [Run the App](#run-the-app)
@@ -129,14 +128,6 @@ flowchart TD
     C --> J["Snapshot Cache"]
     B --> K["CSVExportService"]
 ```
-
-## Diagrams
-
-### Entity Relationship Diagram
-
-### Sync / Migration Tactics Diagram
-
-You can keep using the Mermaid diagram above, or replace it with your own exported image (for example: `architecture/visual-tracker-sync-flow.png`).
 
 ## Requirements
 
