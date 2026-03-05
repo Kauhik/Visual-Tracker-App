@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1600" viewBox="0 0 2200 1600">
+  <defs>
+    <style>
+      .title { font: 700 28px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; fill: #1f2937; }
+      .subtitle { font: 500 14px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; fill: #4b5563; }
+      .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 10; }
+      .entity { font: 700 15px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; fill: #0f172a; }
+      .attr { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #334155; }
+      .line { stroke: #475569; stroke-width: 2.2; fill: none; }
+      .rel { font: 12px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; fill: #111827; }
+      .card { font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #111827; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="2200" height="1600" fill="#ffffff"/>
+  <text class="title" x="60" y="56">Visual Tracker App - ERD</text>
+  <text class="subtitle" x="60" y="84">Source: CloudKitStore schema + SwiftData models</text>
+
+  <!-- COHORT -->
+  <rect class="box" x="930" y="120" width="340" height="130" />
+  <text class="entity" x="950" y="148">COHORT</text>
+  <text class="attr" x="950" y="174">recordName PK (String)</text>
+  <text class="attr" x="950" y="194">cohortId (String)</text>
+  <text class="attr" x="950" y="214">name, createdAt, updatedAt</text>
+
+  <!-- ROW 2 -->
+  <rect class="box" x="80" y="360" width="340" height="150" />
+  <text class="entity" x="100" y="388">COHORT_GROUP</text>
+  <text class="attr" x="100" y="414">id PK (UUID)</text>
+  <text class="attr" x="100" y="434">name (String)</text>
+  <text class="attr" x="100" y="454">colorHex (String?)</text>
+
+  <rect class="box" x="490" y="360" width="340" height="170" />
+  <text class="entity" x="510" y="388">DOMAIN</text>
+  <text class="attr" x="510" y="414">id PK (UUID)</text>
+  <text class="attr" x="510" y="434">name (String)</text>
+  <text class="attr" x="510" y="454">colorHex (String?)</text>
+  <text class="attr" x="510" y="474">overallModeRaw (String)</text>
+
+  <rect class="box" x="900" y="360" width="340" height="150" />
+  <text class="entity" x="920" y="388">CATEGORY_LABEL</text>
+  <text class="attr" x="920" y="414">key PK (String)</text>
+  <text class="attr" x="920" y="434">code (String)</text>
+  <text class="attr" x="920" y="454">title (String)</text>
+
+  <rect class="box" x="1310" y="330" width="780" height="230" />
+  <text class="entity" x="1330" y="358">LEARNING_OBJECTIVE</text>
+  <text class="attr" x="1330" y="384">id PK (UUID), code (String unique)</text>
+  <text class="attr" x="1330" y="404">title (String), objectiveDescription (String)</text>
+  <text class="attr" x="1330" y="424">isQuantitative (Bool), isArchived (Bool), sortOrder (Int)</text>
+  <text class="attr" x="1330" y="444">parentId FK (UUID?), parentCode (String?)</text>
+
+  <!-- ROW 3 -->
+  <rect class="box" x="450" y="720" width="400" height="190" />
+  <text class="entity" x="470" y="748">STUDENT</text>
+  <text class="attr" x="470" y="774">id PK (UUID), name (String)</text>
+  <text class="attr" x="470" y="794">createdAt (Date), session (Morning/Afternoon)</text>
+  <text class="attr" x="470" y="814">domainId FK (UUID?)</text>
+  <text class="attr" x="470" y="834">legacy group FK (UUID?)</text>
+
+  <rect class="box" x="70" y="980" width="430" height="170" />
+  <text class="entity" x="90" y="1008">STUDENT_GROUP_MEMBERSHIP</text>
+  <text class="attr" x="90" y="1034">id PK (UUID)</text>
+  <text class="attr" x="90" y="1054">studentId FK (UUID)</text>
+  <text class="attr" x="90" y="1074">groupId FK (UUID)</text>
+  <text class="attr" x="90" y="1094">createdAt, updatedAt</text>
+
+  <rect class="box" x="560" y="980" width="430" height="210" />
+  <text class="entity" x="580" y="1008">OBJECTIVE_PROGRESS</text>
+  <text class="attr" x="580" y="1034">id PK (UUID), studentId FK (UUID)</text>
+  <text class="attr" x="580" y="1054">objectiveId FK (UUID?), objectiveCode (String)</text>
+  <text class="attr" x="580" y="1074">value (Int), completionPercentage (Int)</text>
+  <text class="attr" x="580" y="1094">status (String), notes (String)</text>
+  <text class="attr" x="580" y="1114">lastUpdated (Date)</text>
+
+  <rect class="box" x="1060" y="980" width="420" height="170" />
+  <text class="entity" x="1080" y="1008">STUDENT_CUSTOM_PROPERTY</text>
+  <text class="attr" x="1080" y="1034">id PK (UUID), studentId FK (UUID)</text>
+  <text class="attr" x="1080" y="1054">key (String), value (String)</text>
+  <text class="attr" x="1080" y="1074">sortOrder (Int)</text>
+
+  <rect class="box" x="1510" y="930" width="620" height="250" />
+  <text class="entity" x="1530" y="958">EXPERTISE_CHECK_OBJECTIVE_SCORE</text>
+  <text class="attr" x="1530" y="984">id PK (UUID)</text>
+  <text class="attr" x="1530" y="1004">expertiseCheckId FK (UUID)</text>
+  <text class="attr" x="1530" y="1024">objectiveId FK (UUID?), objectiveCode (String)</text>
+  <text class="attr" x="1530" y="1044">value (Int), statusRawValue (String)</text>
+  <text class="attr" x="1530" y="1064">lastEditedByDisplayName (String?)</text>
+  <text class="attr" x="1530" y="1084">createdAt, updatedAt</text>
+
+  <!-- Cohort contains all -->
+  <line class="line" x1="1040" y1="250" x2="250" y2="360" marker-end="url(#arrow)"/>
+  <text class="rel" x="620" y="300">contains</text><text class="card" x="930" y="272">1</text><text class="card" x="260" y="352">N</text>
+
+  <line class="line" x1="1060" y1="250" x2="660" y2="360" marker-end="url(#arrow)"/>
+  <text class="rel" x="860" y="308">contains</text><text class="card" x="1080" y="272">1</text><text class="card" x="668" y="352">N</text>
+
+  <line class="line" x1="1100" y1="250" x2="1070" y2="360" marker-end="url(#arrow)"/>
+  <text class="rel" x="1118" y="316">contains</text><text class="card" x="1112" y="272">1</text><text class="card" x="1080" y="352">N</text>
+
+  <line class="line" x1="1170" y1="250" x2="1700" y2="330" marker-end="url(#arrow)"/>
+  <text class="rel" x="1450" y="280">contains</text><text class="card" x="1184" y="272">1</text><text class="card" x="1688" y="322">N</text>
+
+  <line class="line" x1="1040" y1="250" x2="650" y2="720" marker-end="url(#arrow)"/>
+  <text class="rel" x="760" y="520">contains</text><text class="card" x="1020" y="274">1</text><text class="card" x="654" y="712">N</text>
+
+  <line class="line" x1="1020" y1="250" x2="300" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="520" y="660">contains</text><text class="card" x="1000" y="274">1</text><text class="card" x="308" y="972">N</text>
+
+  <line class="line" x1="1080" y1="250" x2="760" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="920" y="700">contains</text><text class="card" x="1064" y="274">1</text><text class="card" x="770" y="972">N</text>
+
+  <line class="line" x1="1120" y1="250" x2="1260" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="1210" y="670">contains</text><text class="card" x="1108" y="274">1</text><text class="card" x="1268" y="972">N</text>
+
+  <line class="line" x1="1200" y1="250" x2="1780" y2="930" marker-end="url(#arrow)"/>
+  <text class="rel" x="1510" y="640">contains</text><text class="card" x="1188" y="274">1</text><text class="card" x="1788" y="922">N</text>
+
+  <!-- Domain relationships -->
+  <line class="line" x1="700" y1="530" x2="700" y2="720" marker-end="url(#arrow)"/>
+  <text class="rel" x="718" y="634">assigned_to</text><text class="card" x="708" y="548">1</text><text class="card" x="708" y="712">N</text>
+
+  <line class="line" x1="820" y1="470" x2="1820" y2="930" marker-end="url(#arrow)"/>
+  <text class="rel" x="1260" y="650">reviewed_in</text><text class="card" x="830" y="462">1</text><text class="card" x="1828" y="922">N</text>
+
+  <!-- Student relationships -->
+  <line class="line" x1="520" y1="910" x2="350" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="410" y="945">has</text><text class="card" x="528" y="902">1</text><text class="card" x="358" y="972">N</text>
+
+  <line class="line" x1="650" y1="910" x2="730" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="680" y="945">has</text><text class="card" x="658" y="902">1</text><text class="card" x="738" y="972">N</text>
+
+  <line class="line" x1="780" y1="910" x2="1200" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="970" y="945">has</text><text class="card" x="788" y="902">1</text><text class="card" x="1210" y="972">N</text>
+
+  <!-- Membership to group -->
+  <line class="line" x1="220" y1="980" x2="220" y2="510" marker-end="url(#arrow)"/>
+  <text class="rel" x="238" y="760">belongs_to</text><text class="card" x="230" y="972">N</text><text class="card" x="230" y="528">1</text>
+
+  <!-- Objective relationships -->
+  <line class="line" x1="1670" y1="560" x2="810" y2="980" marker-end="url(#arrow)"/>
+  <text class="rel" x="1260" y="810">tracked_by</text><text class="card" x="1660" y="552">1</text><text class="card" x="818" y="972">N</text>
+
+  <line class="line" x1="1790" y1="560" x2="1860" y2="930" marker-end="url(#arrow)"/>
+  <text class="rel" x="1880" y="760">scored_for</text><text class="card" x="1798" y="552">1</text><text class="card" x="1868" y="922">N</text>
+
+  <!-- Category label relation to root objective code -->
+  <line class="line" x1="1240" y1="435" x2="1310" y2="435" marker-end="url(#arrow)"/>
+  <text class="rel" x="1248" y="426">code_matches_root</text>
+
+  <!-- Self relation on learning objective -->
+  <path class="line" d="M 2050 380 C 2140 380, 2140 520, 2050 520" marker-end="url(#arrow)"/>
+  <text class="rel" x="2060" y="452">parent_of</text>
+  <text class="card" x="2036" y="396">1</text>
+  <text class="card" x="2036" y="514">N</text>
+</svg>
