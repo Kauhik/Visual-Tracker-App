@@ -134,8 +134,6 @@ flowchart TD
 
 ### Entity Relationship Diagram
 
-Add your ERD image here when ready.
-
 ### Sync / Migration Tactics Diagram
 
 You can keep using the Mermaid diagram above, or replace it with your own exported image (for example: `architecture/visual-tracker-sync-flow.png`).
