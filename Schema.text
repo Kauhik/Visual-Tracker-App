@@ -1,0 +1,196 @@
+DEFINE SCHEMA
+
+    RECORD TYPE CategoryLabel (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        code                    STRING QUERYABLE SORTABLE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        key                     STRING QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        title                   STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE Cohort (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortId                STRING QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        name                    STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE CohortGroup (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        colorHex                STRING,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        name                    STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE Domain (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        colorHex                STRING,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        name                    STRING QUERYABLE SORTABLE,
+        overallMode             STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE ExpertiseCheckObjectiveScore (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        expertiseCheckRef       REFERENCE QUERYABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        objectiveCode           STRING QUERYABLE SORTABLE,
+        objectiveRef            REFERENCE QUERYABLE,
+        status                  STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        value                   INT64 SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE LearningObjective (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        code                    STRING QUERYABLE SORTABLE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        isArchived              INT64 QUERYABLE,
+        isQuantitative          INT64 QUERYABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        objectiveDescription    STRING,
+        parentCode              STRING QUERYABLE SORTABLE,
+        parentRef               REFERENCE QUERYABLE,
+        sortOrder               INT64 SORTABLE,
+        title                   STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE ObjectiveProgress (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        completionPercentage    INT64 SORTABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        lastUpdated             TIMESTAMP QUERYABLE SORTABLE,
+        notes                   STRING,
+        objectiveCode           STRING QUERYABLE SORTABLE,
+        objectiveRef            REFERENCE QUERYABLE,
+        status                  STRING QUERYABLE SORTABLE,
+        student                 REFERENCE QUERYABLE,
+        studentRef              REFERENCE QUERYABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        value                   INT64 SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE Student (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE QUERYABLE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        domain                  REFERENCE QUERYABLE,
+        group                   REFERENCE QUERYABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        name                    STRING QUERYABLE SORTABLE,
+        session                 STRING QUERYABLE SORTABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE StudentCustomProperty (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        key                     STRING QUERYABLE SORTABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        sortOrder               INT64 SORTABLE,
+        student                 REFERENCE QUERYABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        value                   STRING,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE StudentGroupMembership (
+        "___createTime"         TIMESTAMP,
+        "___createdBy"          REFERENCE,
+        "___etag"               STRING,
+        "___modTime"            TIMESTAMP,
+        "___modifiedBy"         REFERENCE,
+        "___recordID"           REFERENCE,
+        cohortRef               REFERENCE QUERYABLE,
+        createdAt               TIMESTAMP QUERYABLE SORTABLE,
+        groupRef                REFERENCE QUERYABLE,
+        lastEditedByDisplayName STRING QUERYABLE,
+        studentRef              REFERENCE QUERYABLE,
+        updatedAt               TIMESTAMP QUERYABLE SORTABLE,
+        GRANT READ, CREATE, WRITE TO "_icloud"
+    );
+
+    RECORD TYPE Users (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        roles           LIST<INT64>,
+        GRANT WRITE TO "_creator",
+        GRANT READ, WRITE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+

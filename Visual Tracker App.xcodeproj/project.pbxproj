@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		802EBCC12F592DC70098F669 /* Schema.text in Sources */ = {isa = PBXBuildFile; fileRef = 802EBCC02F592DBF0098F669 /* Schema.text */; };
 		80BC947C2F308F6A00667F8B /* CloudKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 80BC947B2F308F6A00667F8B /* CloudKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 /* End PBXBuildFile section */
 
@@ -28,6 +29,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		802EBCC02F592DBF0098F669 /* Schema.text */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = Schema.text; sourceTree = "<group>"; };
 		809B2D252F285985007F9E7B /* Visual Tracker App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Visual Tracker App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		809B2D342F285986007F9E7B /* Visual Tracker AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Visual Tracker AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		809B2D3E2F285986007F9E7B /* Visual Tracker AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Visual Tracker AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -86,6 +88,7 @@
 				809B2D412F285986007F9E7B /* Visual Tracker AppUITests */,
 				80BC947A2F308F6A00667F8B /* Frameworks */,
 				809B2D262F285985007F9E7B /* Products */,
+				802EBCC02F592DBF0098F669 /* Schema.text */,
 			);
 			sourceTree = "<group>";
 		};
@@ -251,6 +254,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				802EBCC12F592DC70098F669 /* Schema.text in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
